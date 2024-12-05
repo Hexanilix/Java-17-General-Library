@@ -24,4 +24,21 @@ public class General {
         }
         return "0".repeat(Math.max(0, size - hex.length())) + hex;
     }
+
+    public static class Stopwatch {
+        private long time = System.nanoTime();
+        private boolean running = false;
+        public Stopwatch() {}
+        public void start() {
+            this.running = true;
+            this.time = System.nanoTime();
+        }
+        public void stop() {
+            running = false;
+            this.time = System.nanoTime() - this.time;
+        }
+        public long getTime() {
+            return running ? System.nanoTime() - time : time;
+        }
+    }
 }

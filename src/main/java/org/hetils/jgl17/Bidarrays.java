@@ -1,4 +1,4 @@
-package org.hetils;
+package org.hetils.jgl17;
 
 public class Bidarrays {
     public static double[][] normalize(double[][] map) {

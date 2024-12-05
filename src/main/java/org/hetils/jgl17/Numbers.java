@@ -1,4 +1,4 @@
-package org.hetils;
+package org.hetils.jgl17;
 
 import java.util.Random;
 

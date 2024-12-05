@@ -1,4 +1,4 @@
-package org.hetils;
+package org.hetils.jgl17;
 
 public class Files {
     public static String getReadableFileSize(long size) {

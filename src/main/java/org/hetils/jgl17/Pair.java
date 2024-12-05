@@ -1,8 +1,8 @@
 package org.hetils.jgl17;
 
 public class Pair<P1, P2> {
-    private P1 key;
-    private P2 value;
+    protected P1 key;
+    protected P2 value;
     public Pair(P1 obj1, P2 obj2) {
         this.key = obj1;
         this.value = obj2;

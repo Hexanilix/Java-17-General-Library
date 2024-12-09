@@ -24,8 +24,14 @@ public class Pair<P1, P2> {
     public void setKey(P1 k) {
         this.key = k;
     }
+
     public void setValue(P2 v) {
         this.value = v;
+    }
+
+    public void set(Pair<P1, P2> pair) {
+        this.key = pair != null ? pair.key : null;
+        this.value = pair != null ? pair.value : null;
     }
 
     @Override

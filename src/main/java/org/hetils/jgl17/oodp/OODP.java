@@ -11,6 +11,9 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.file.Files;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentNavigableMap;
+import java.util.concurrent.ConcurrentSkipListMap;
 
 //TODO create readable oodp strings (Object Oriented Data Preserving)
 public class OODP {
@@ -29,6 +32,25 @@ public class OODP {
         public <T> T as(@NotNull ObjectiveMap.MapToObjectFunction<T> func) { return func.create(this); }
 
         public <T> T as(Class<T> clazz) { return mapAsClass(this, clazz); }
+
+        public <K, V> Map<K, V> asMap(Class<K> keyc, Class<V> valc) {
+            Map<K, V> map = new HashMap<>();
+            for (String key : this.keySet()) {
+                if (key.startsWith("|")) {
+                    Class<?> c;
+                    try {
+                        c = Class.forName(key.substring(1).split("\\|")[0]);
+                    } catch (ClassNotFoundException e) {
+                        throw new RuntimeException(e);
+                    }
+                    String k = key.split("\\|")[2];
+                    map.put((K) stringAs(k.substring(0, k.length()-1), c), this.stringAs(this.getString(key), valc));
+                } else {
+                    map.put(stringAs(key.substring(0, key.length()-1), keyc), this.stringAs(this.getString(key), valc));
+                }
+            }
+            return map;
+        }
 
         /**
          * This function simply return the wrapper type for primitive classes
@@ -53,15 +75,46 @@ public class OODP {
             if (ob != null) return ob;
             else return def;
         }
+
+        public  <T> T stringAs(String str, Class<T> clazz) {
+            Object o;
+            if (isDefault(clazz)) {
+                if (clazz == String.class) o = str;
+                else if (clazz == int.class || clazz == Integer.class) o = Integer.parseInt(str);
+                else if (clazz == double.class || clazz == Double.class) o = Double.parseDouble(str);
+                else if (clazz == long.class || clazz == Long.class) o = Long.parseLong(str);
+                else if (clazz == boolean.class || clazz == Boolean.class) {
+                    if (str.equalsIgnoreCase("true")) o = true;
+                    else if (str.equalsIgnoreCase("false")) o = false;
+                    else throw new RuntimeException(new ClassCastException("java.lang.String can't be cast to boolean"));
+                }
+                else if (clazz == float.class || clazz == Float.class) o = Float.parseFloat(str);
+                else if (clazz == char.class || clazz == Character.class) o = str.charAt(0);
+                else if (clazz == byte.class || clazz == Byte.class) o = Byte.parseByte(str);
+                else if (clazz == short.class || clazz == Short.class) o = Short.parseShort(str);
+                else if (clazz == UUID.class) o = UUID.fromString(str);
+                else return null;
+                if (clazz.equals(o.getClass()) || getWrapperType(clazz) == o.getClass()) return (T) o;
+                else throw new RuntimeException(o.getClass().getName() + " is not an instance of " + clazz.getName());
+            } else if (clazz == Object.class) {
+                for (Class<?> c : DEFAULT_CLASSES) {
+                    try {
+                        return (T) stringAs(str, c);
+                    } catch (RuntimeException ignore) {}
+                }
+                return null;
+            } else return map(str).as(clazz);
+        }
+
         public <T> T get(String key, Class<T> clazz) {
             Object o;
             if (containsKey(key)) {
-                if (isDefaultClass(clazz)) {
+                if (isDefault(clazz)) {
                     if (clazz == String.class) o = getString(key);
                     else if (clazz == int.class || clazz == Integer.class) o = getInt(key);
                     else if (clazz == double.class || clazz == Double.class) o = getDouble(key);
                     else if (clazz == long.class || clazz == Long.class) o = getLong(key);
-                    else if (clazz == boolean.class || clazz == Boolean.class) o = asBoolean(key);
+                    else if (clazz == boolean.class || clazz == Boolean.class) o = getBoolean(key);
                     else if (clazz == float.class || clazz == Float.class) o = getFloat(key);
                     else if (clazz == char.class || clazz == Character.class) o = getString(key).charAt(0);
                     else if (clazz == byte.class || clazz == Byte.class) o = getByte(key);
@@ -71,7 +124,8 @@ public class OODP {
                     if (clazz.equals(o.getClass()) || getWrapperType(clazz) == o.getClass()) return (T) o;
                     else throw new RuntimeException(o.getClass().getName() + " is not an instance of " + clazz.getName());
                 } else return mapAsClass(this.getObjectiveMap(key), clazz);
-            } else return null;
+            }
+            return null;
         }
 
         public <T> Object getArr(String key, Class<T> clazz) {
@@ -79,7 +133,7 @@ public class OODP {
             else if (clazz == int.class || clazz == Integer.class) return getIntArr(key);
             else if (clazz == double.class || clazz == Double.class) return getDoubleArr(key);
             else if (clazz == long.class || clazz == Long.class) return getLongArr(key);
-            else if (clazz == boolean.class || clazz == Boolean.class) return asBoolean(key);
+            else if (clazz == boolean.class || clazz == Boolean.class) return getBoolean(key);
             else if (clazz == float.class || clazz == Float.class) return getFloat(key);
             else if (clazz == char.class || clazz == Character.class) return getString(key);
             else if (clazz == byte.class || clazz == Byte.class) return getByteArr(key);
@@ -115,14 +169,14 @@ public class OODP {
                 arr[i] = om.getString(String.valueOf(i));
             return arr;
         }
-        public List<String> asStringList(String s) { return Arrays.asList(((String) this.get(s)).split(",")); }
+        public List<String> getStringList(String s) { return Arrays.asList(((String) this.get(s)).split(",")); }
 
-        public boolean asBoolean(String s) { return Boolean.parseBoolean((String) this.get(s)); }
+        public boolean getBoolean(String s) { return Boolean.parseBoolean((String) this.get(s)); }
         public boolean[] getBooleanArr(String s) {
             ObjectiveMap om = this.getObjectiveMap(s);
             boolean[] arr = new boolean[om.size()];
             for (int i = 0; i < om.size(); i++)
-                arr[i] = om.asBoolean(String.valueOf(i));
+                arr[i] = om.getBoolean(String.valueOf(i));
             return arr;
         }
 
@@ -205,7 +259,7 @@ public class OODP {
         public <T> T getObject(String s, @NotNull ObjectiveMap.MapToObjectFunction<T> func) { return func.create(this.getObjectiveMap(s)); }
 
         public <T> T getObject(String key, Class<T> clazz) {
-            if (isDefaultClass(clazz)) return get(key, clazz);
+            if (isDefault(clazz)) return get(key, clazz);
             else return mapAsClass(this.getObjectiveMap(key), clazz);
         }
 
@@ -246,34 +300,37 @@ public class OODP {
         }
     }
 
-    private static final Set<Class<?>> DEFAULT_CLASSES = new HashSet<>();
-    static {
-        DEFAULT_CLASSES.add(byte.class);
-        DEFAULT_CLASSES.add(short.class);
-        DEFAULT_CLASSES.add(int.class);
-        DEFAULT_CLASSES.add(long.class);
-        DEFAULT_CLASSES.add(float.class);
-        DEFAULT_CLASSES.add(double.class);
-        DEFAULT_CLASSES.add(String.class);
-        DEFAULT_CLASSES.add(Boolean.class);
-        DEFAULT_CLASSES.add(Character.class);
-        DEFAULT_CLASSES.add(Byte.class);
-        DEFAULT_CLASSES.add(Short.class);
-        DEFAULT_CLASSES.add(Integer.class);
-        DEFAULT_CLASSES.add(Long.class);
-        DEFAULT_CLASSES.add(Float.class);
-        DEFAULT_CLASSES.add(Double.class);
-        DEFAULT_CLASSES.add(BigDecimal.class);
-        DEFAULT_CLASSES.add(BigInteger.class);
-        DEFAULT_CLASSES.add(UUID.class);
+    private static final Class<?>[] DEFAULT_CLASSES = new Class<?>[]{
+            byte.class,
+            short.class,
+            int.class,
+            long.class,
+            float.class,
+            double.class,
+            boolean.class,
+            Boolean.class,
+            Byte.class,
+            Short.class,
+            Integer.class,
+            Long.class,
+            Float.class,
+            Double.class,
+            UUID.class,
+            String.class,
+            char.class,
+            Character.class,
+    };
+    public static boolean isDefault(@NotNull Class<?> clazz) {
+        if (clazz.isPrimitive()) return true;
+        for (Class<?> defaultClass : DEFAULT_CLASSES) if (clazz == defaultClass) return true;
+        return false;
     }
-    public static boolean isDefaultClass(@NotNull Class<?> clazz) { return clazz.isPrimitive() || DEFAULT_CLASSES.contains(clazz); }
 
     private static final Set<Class<?>> STRINGABLE_CLASSES = new HashSet<>();
     static {
         STRINGABLE_CLASSES.add(UUID.class);
     }
-    public static boolean isStringable(Class<?> c) { return isDefaultClass(c) || STRINGABLE_CLASSES.contains(c); }
+    public static boolean isStringable(Class<?> c) { return isDefault(c) || STRINGABLE_CLASSES.contains(c); }
 
     private static final Set<Class<?>> DOESNT_REQUIRES_PARAGRAPHS = new HashSet<>();
     static {
@@ -297,10 +354,25 @@ public class OODP {
 
     public static boolean isTable(@NotNull Class<?> clazz) { return clazz.isArray() || Collection.class.isAssignableFrom(clazz); }
 
+    public static boolean isMap(Class<?> clazz) {
+        return Map.class.isAssignableFrom(clazz)
+                || HashMap.class.isAssignableFrom(clazz)
+                || LinkedHashMap.class.isAssignableFrom(clazz)
+                || TreeMap.class.isAssignableFrom(clazz)
+                || ConcurrentHashMap.class.isAssignableFrom(clazz)
+                || Hashtable.class.isAssignableFrom(clazz)
+                || EnumMap.class.isAssignableFrom(clazz)
+                || WeakHashMap.class.isAssignableFrom(clazz)
+                || IdentityHashMap.class.isAssignableFrom(clazz)
+                || Properties.class.isAssignableFrom(clazz)
+                || ConcurrentSkipListMap.class.isAssignableFrom(clazz)
+                || ConcurrentNavigableMap.class.isAssignableFrom(clazz);
+    }
+
     public interface ObjectToOODPFunction <T> { String convert(T obj); }
     public interface ObjectToHashMapFunction <T> extends ObjectToOODPFunction<T> {
         HashMap<String, Object> map(T obj);
-        //TODO add map to string
+
         default String convert(OODP dp, T obj) {
             StringBuilder sb = new StringBuilder("{");
             for (Map.Entry<String, Object> e : map(obj).entrySet()) {
@@ -308,7 +380,7 @@ public class OODP {
 
                 Object v = e.getValue();
                 Class<?> c = v.getClass();
-                if (isDefaultClass(c) || isStringable(c)) {
+                if (isDefault(c) || isStringable(c)) {
                     if (requiresParagraphs(c)) sb.append("\"").append(v).append("\"");
                     else sb.append(v);
                 } else if (isTable(c)) {
@@ -422,6 +494,39 @@ public class OODP {
         return fields;
     }
 
+    //TODO fix when there are more that 10 objects in a Map<Object, ?>
+    public <T> T mapAsClass(ObjectiveMap om, Class<T> clazz) {
+        if (create_functions.containsKey(clazz)) {
+            return (T) create_functions.get(clazz).create(om);
+        } else {
+            if (clazz == Object.class) return (T) om;
+            try {
+                T instance = clazz.getDeclaredConstructor().newInstance();
+                for (Field f : getFieldsFor(clazz)) {
+                    f.setAccessible(true);
+                    if (!Modifier.isStatic(f.getModifiers())) {
+                        if (isTable(f.getType())) {
+                            if (f.getGenericType() instanceof Class<?> cpt && cpt.getComponentType() != null)
+                                f.set(instance, om.getArr(f.getName(), cpt.getComponentType()));
+                            else {
+                                Type type = ((ParameterizedType) f.getGenericType()).getActualTypeArguments()[0];
+                                if (type instanceof ParameterizedType para_type)
+                                    f.set(instance, om.getObjectList(f.getName(), para_type));
+                                else f.set(instance, om.getObjectList(f.getName(), type));
+                            }
+                        } else f.set(instance, om.get(f.getName(), f.getType()));
+                    }
+                }
+                return instance;
+            } catch (NoSuchMethodException e) {
+                //TODO create instance from an existing constructor
+                throw new RuntimeException("Class " + clazz.getName() + " doesn't have a default (parameter-less) constructor.", e);
+            } catch (Exception e) {
+                throw new RuntimeException("Error creating or setting fields for class: " + clazz.getName(), e);
+            }
+        }
+    }
+
 
     //Converting objects to strings
     public static class MalformedOODPException extends Exception {  public MalformedOODPException(String s) { super(s); } }
@@ -440,12 +545,14 @@ public class OODP {
                 return hash.convert(this, (T) o);
             else return func.convert((T) o);
         }
-        else if (isDefaultClass(c) || isStringable(c)) {
+        else if (isDefault(c) || isStringable(c)) {
             if (requiresParagraphs(c)) return "\"" + o + "\"";
             else return String.valueOf(o);
         }
         else if (isTable(c))
             return arrayToOodp(o);
+        else if (isMap(c))
+            return mapToOodp(o);
         else {
             StringBuilder sb = new StringBuilder("{");
             for (Field field : getFieldsFor(c)) {
@@ -462,6 +569,7 @@ public class OODP {
             return sb.append("}").toString();
         }
     }
+
     public @NotNull String arrayToOodp(@NotNull Object array) {
         StringBuilder sb = new StringBuilder("[");
         if (array instanceof List<?> list) {
@@ -477,6 +585,35 @@ public class OODP {
 
         if (sb.length() > 1 && sb.charAt(sb.length()-1) != ']') sb.deleteCharAt(sb.length() - 1);
         return sb.append("]").toString();
+    }
+
+    public String mapToOodp(Object o) {
+        if (o instanceof Map<?, ?> map) {
+            StringBuilder sb = new StringBuilder("{");
+            boolean sk = true;
+            Class<?> keyc = map.entrySet().iterator().next().getKey().getClass();
+            for (Map.Entry<?, ?> e : map.entrySet())
+                if (e.getKey().getClass() != keyc) { sk = false; break; }
+            int i = 0;
+            if (sk) {
+                for (Map.Entry<?, ?> e : map.entrySet()) {
+                    sb.append(toOodp(e.getKey())).append(i).append('=').append(toOodp(e.getValue())).append(',');
+                    i++;
+                }
+            } else {
+                for (Map.Entry<?, ?> e : map.entrySet()) {
+                    String k;
+                    Class<?> c = e.getKey().getClass();
+                    if (!isDefault(c) && !isStringable(c) && !isTable(c) && !isMap(c)) {
+                        k = '|' + c.getName() + '|' + toOodp(e.getKey());
+                    } else k = toOodp(e.getKey());
+                    sb.append(k).append(i).append('=').append(toOodp(e.getValue())).append(',');
+                    i++;
+                }
+            }
+            if (sb.length() > 1 && sb.charAt(sb.length()-1) != '}') sb.deleteCharAt(sb.length() - 1);
+            return sb.append('}').toString();
+        } else throw new RuntimeException(new IllegalArgumentException("Object is not a map"));
     }
 
     public @NotNull String clean(@NotNull String s) {
@@ -508,18 +645,21 @@ public class OODP {
         while (i < chars.length) {
             if (!p) while (chars[i] == ' ') i++;
             char cr = chars[i];
-            if (cr == '{') o++;
-            else if (cr == '}') o--;
-            if (cr == '[') a++;
-            else if (cr == ']') a--;
-            else if (cr == '\"') p = !p;
-            if (cr != c || a != 0 || o != 0) sb.append(cr);
-            if ((!p && o == 0 && a == 0 && cr == c) || i == chars.length - 1) {
+            if (cr == '\"') p = !p;
+            else if (!p) {
+                if (cr == '{') o++;
+                else if (cr == '}') o--;
+                else if (cr == '[') a++;
+                else if (cr == ']') a--;
+            }
+            if (cr != c || p || a != 0 || o != 0) sb.append(cr);
+            if ((!p && o == 0 && a == 0 && cr == c)) {
                 sts.add(sb.toString());
                 sb = new StringBuilder();
             }
             i++;
         }
+        if (!sb.isEmpty()) sts.add(sb.toString());
         return sts;
     }
 
@@ -537,13 +677,24 @@ public class OODP {
         if (s.charAt(0) == '{') {
             if (s.charAt(s.length()-1) == '}')
                 s = s.substring(1, s.length()-1);
-            else throw new RuntimeException(new MalformedOODPException(s.substring(Math.max(s.length()-50, 0))));
+//            else throw new RuntimeException(new MalformedOODPException(s));
         }
         ObjectiveMap om = new ObjectiveMap();
         List<String> spl = smartSplit(s, ',');
         for (String st : spl) {
-            String k = st.split("=")[0];
-            String v = st.split("=", 2)[1];
+            String k;
+            String v;
+            if (st.startsWith("{") || st.startsWith("[") || st.startsWith("|")) {
+                char endc = (st.startsWith("{") || st.startsWith("|")) ? '}' : ']';
+                int i = 1;
+                while (st.charAt(i) != endc) i++;
+                k = st.substring(0, i + 2);
+                v = st.substring(i + 3);
+            } else {
+                String[] parts = st.split("=", 2);
+                k = parts[0];
+                v = parts.length > 1 ? parts[1] : "";
+            }
             char[] chars = v.toCharArray();
             StringBuilder sb = new StringBuilder();
             int i = 0;
@@ -573,36 +724,6 @@ public class OODP {
             if (!override) om.put(k, sb.toString());
         }
         return om;
-    }
-
-    public <T> T mapAsClass(ObjectiveMap om, Class<T> clazz) {
-        if (create_functions.containsKey(clazz)) {
-            return (T) create_functions.get(clazz).create(om);
-        } else {
-            try {
-                T instance = clazz.getDeclaredConstructor().newInstance();
-                for (Field f : getFieldsFor(clazz)) {
-                    f.setAccessible(true);
-                    if (!Modifier.isStatic(f.getModifiers())) {
-                        if (isTable(f.getType())) {
-                            if (f.getGenericType() instanceof Class<?> cpt && cpt.getComponentType() != null)
-                                f.set(instance, om.getArr(f.getName(), cpt.getComponentType()));
-                        } else {
-                            Type type = ((ParameterizedType) f.getGenericType()).getActualTypeArguments()[0];
-                            if (type instanceof ParameterizedType para_type)
-                                f.set(instance, om.getObjectList(f.getName(), para_type));
-                            else f.set(instance, om.getObjectList(f.getName(), type));
-                        }
-                    } else f.set(instance, om.get(f.getName(), f.getType()));
-                }
-                return instance;
-            } catch (NoSuchMethodException e) {
-                //TODO create instance from an existing constructor
-                throw new RuntimeException("Class " + clazz.getName() + " doesn't have a default (parameter-less) constructor.", e);
-            } catch (Exception e) {
-                throw new RuntimeException("Error creating or setting fields for class: " + clazz.getName(), e);
-            }
-        }
     }
 
 }

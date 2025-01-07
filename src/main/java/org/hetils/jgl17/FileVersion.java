@@ -66,7 +66,7 @@ public class FileVersion {
                 try {
                     ver[i] = Integer.parseInt(s[i]);
                 } catch (NumberFormatException e) {
-                    throw new FileVersionFormatException("Cannot convert String \"" + v + "\" to FileVersion. Supported char combination: x.x.x (n numbers separated by a '.'");
+                    throw new FileVersionFormatException("Cannot convert String \"" + v + "\" to FileVersion. Supported char combination: x.x.x (any amount of numbers separated by a point (full stop/period))");
                 }
             }
         } catch (FileVersionFormatException e) {
@@ -98,7 +98,7 @@ public class FileVersion {
             try {
                 ver[i] = Integer.parseInt(s[i]);
             } catch (NumberFormatException e) {
-                throw new FileVersionFormatException("Cannot convert String \"" + v + "\" to FileVersion. Supported char combination: x.x.x (n numbers separated by a '.'");
+                throw new FileVersionFormatException("Cannot convert String \"" + v + "\" to FileVersion. Supported char combination: x.x.x (any amount of numbers separated by a point (full stop/period))");
             }
         }
     }

@@ -15,41 +15,39 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentNavigableMap;
 import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.function.Function;
 
 //TODO create readable oodp strings (Object Oriented Data Preserving)
 public class OODP {
-    public interface ObjectToOODPFunction <T> { Object convert(T obj); }
-    public interface ObjectToHashMapFunction <T> extends ObjectToOODPFunction<T> {
-        HashMap<String, Object> map(T obj);
-        @Override
-        default Object convert(T obj) { return map(obj); }
-    }
-    //TODO do string instead of om
-    public interface MapToObjectFunction<T> { T create(ObjectiveMap om); }
-    
-    public static <T> T cast(Class<T> ignore, Object obj) throws ClassCastException { return (T) obj; }
-    public static <T extends Enum<T>> @Nullable T getEnumValue(@NotNull Class<T> enumClass, String name) {
-        for (T constant : enumClass.getEnumConstants())
-            if (constant.name().equalsIgnoreCase(name))
-                return constant;
-        return null;
+    public static class Converter<I, T> {
+        private Class<I> i;
+        private Class<T> o;
+        private final Function<I, T> f;
+        public Converter(Class<I> in, Class<T> out, Function<I, T> func) {
+            i = in;
+            o = out;
+            f = func;
+        }
+        public Class<I> getI() { return i; }
+        public Class<T> getO() { return o; }
+        public T create(I in) { return f.apply(in); }
     }
 
     //TODO add get...Or methods
-    public class ObjectiveMap extends HashMap<String, Object> {
+    public class ObjectiveMap extends HashMap<String, String> {
         //omfg THANK GOD FOR CHATGPT without em I would not have figured of how tf component classes in arrays work,
         // although I had to figure out myself that if Class<?> is a List it doesn't retain its component
         // and you gotta pass a ParameterizedType instead said Class<?>. The more you know
 
         public ObjectiveMap() { super(); }
-        public ObjectiveMap(Map<? extends String, ?> m) { super(m); }
-        public ObjectiveMap(String key, Object value) { super(); this.put(key, value); }
+        public ObjectiveMap(Map<? extends String, ? extends String> m) { super(m); }
+        public ObjectiveMap(String key, String value) { super(); this.put(key, value); }
 
         public boolean has(String key) { return this.containsKey(key); }
 
-        public <T> T as(@NotNull MapToObjectFunction<T> func) { return func.create(this); }
+        public <I, T> T as(@NotNull Converter<I, T> c) { return c.f.apply(this.as(c.i)); }
 
-        public <T> T as(Class<T> clazz) { return mapAsClass(this, clazz); }
+        public <T> T as(Class<T> clazz) { return parseMapTo(this, clazz); }
 
         public <K, V> HashMap<K, V> asHashMap(Class<K> keyc, Class<V> valc) {
             HashMap<K, V> map = new HashMap<>();
@@ -62,9 +60,9 @@ public class OODP {
                         throw new RuntimeException(e);
                     }
                     String k = key.split("\\|")[2];
-                    map.put((K) stringAs(k.substring(0, k.length()-1), c), this.stringAs(this.getString(key), valc));
+                    map.put((K) parseTo(k.substring(0, k.length()-1), c), parseTo(this.getString(key), valc));
                 } else {
-                    map.put(stringAs(key.substring(0, key.length()-1), keyc), this.stringAs(this.getString(key), valc));
+                    map.put(parseTo(key.substring(0, key.length()-1), keyc), parseTo(this.getString(key), valc));
                 }
             }
             return map;
@@ -94,38 +92,8 @@ public class OODP {
             else return def;
         }
 
-        public  <T> T stringAs(String str, Class<T> clazz) {
-            Object o;
-            if (isDefault(clazz)) {
-                if (clazz == String.class) o = str;
-                else if (clazz == int.class || clazz == Integer.class) o = Integer.parseInt(str);
-                else if (clazz == double.class || clazz == Double.class) o = Double.parseDouble(str);
-                else if (clazz == long.class || clazz == Long.class) o = Long.parseLong(str);
-                else if (clazz == boolean.class || clazz == Boolean.class) {
-                    if (str.equalsIgnoreCase("true")) o = true;
-                    else if (str.equalsIgnoreCase("false")) o = false;
-                    else throw new RuntimeException(new ClassCastException("java.lang.String can't be cast to boolean"));
-                }
-                else if (clazz == float.class || clazz == Float.class) o = Float.parseFloat(str);
-                else if (clazz == char.class || clazz == Character.class) o = str.charAt(0);
-                else if (clazz == byte.class || clazz == Byte.class) o = Byte.parseByte(str);
-                else if (clazz == short.class || clazz == Short.class) o = Short.parseShort(str);
-                else if (clazz == UUID.class) o = UUID.fromString(str);
-                else return null;
-                if (clazz.equals(o.getClass()) || getWrapperType(clazz) == o.getClass()) return (T) o;
-                else throw new RuntimeException(o.getClass().getName() + " is not an instance of " + clazz.getName());
-            } else if (clazz == Object.class) {
-                for (Class<?> c : DEFAULT_CLASSES) {
-                    try {
-                        return (T) stringAs(str, c);
-                    } catch (RuntimeException ignore) {}
-                }
-                return null;
-            } else return map(str).as(clazz);
-        }
-
         public <T> T get(String key, Class<T> clazz) {
-            Object o;
+            Object o = null;
             if (containsKey(key)) {
                 if (isDefault(clazz)) {
                     if (clazz == String.class) o = getString(key);
@@ -138,17 +106,26 @@ public class OODP {
                     else if (clazz == byte.class || clazz == Byte.class) o = getByte(key);
                     else if (clazz == short.class || clazz == Short.class) o = getShort(key);
                     else if (clazz == UUID.class) o = getUUID(key);
-                    else o = getAs(key, clazz);
-                    if (clazz.equals(o.getClass()) || getWrapperType(clazz) == o.getClass()) return (T) o;
-                    else throw new RuntimeException(o.getClass().getName() + " is not an instance of " + clazz.getName());
+                    if (o != null && (clazz.equals(o.getClass()) || getWrapperType(clazz) == o.getClass())) return (T) o;
+                    else throw new RuntimeException((o != null ? o.getClass().getName() : "null") + " is not an instance of " + clazz.getName());
                 } else if (clazz.isEnum()) {
                     String enumName = getString(key);
                     try {
                         return (T) Enum.valueOf((Class<Enum>) clazz, enumName);
-                    } catch (IllegalArgumentException e) {
-                        throw new RuntimeException("No enum constant " + clazz.getName() + "." + enumName, e);
-                    }
-                } else return mapAsClass(this.getObjectiveMap(key), clazz);
+                    } catch (IllegalArgumentException e) { throw new RuntimeException("No enum constant " + clazz.getName() + "." + enumName, e); }
+                } else if (clazz.isArray()) {
+                    if (clazz == int[].class) return (T) getIntArr(key);
+                    else if (clazz == double[].class) return (T) getIntArr(key);
+                    else if (clazz == long[].class) return (T) getLongArr(key);
+                    else if (clazz == boolean[].class) return (T) getBooleanArr(key);
+                    else if (clazz == float[].class) return (T) getFloatArr(key);
+                    else if (clazz == byte[].class) return (T) getByteArr(key);
+                    else if (clazz == short[].class) return (T) getShortArr(key);
+                    else if (clazz == UUID[].class) return (T) getUUIDArr(key);
+                    else return (T) getArray(key, clazz.getComponentType());
+                } else if (clazz == ObjectiveMap.class)
+                    return (T) map(getRaw(key));
+                else return parseTo(getRaw(key), clazz);
             }
             return null;
         }
@@ -166,177 +143,143 @@ public class OODP {
             else if (clazz == UUID.class) return getUUIDArr(key);
             else return getArray(key, clazz);
         }
+
         public <T> T[] getArray(String key, Class<T> clazz) {
-            if (isDefault(clazz)) throw new RuntimeException("Do not use 'getArray()' for primitives, instead use a dedicated function for the desired type ex. 'getIntArr()' or if necessary use 'getObjectArray()'");
-            ObjectiveMap om = this.getObjectiveMap(key);
-            T[] arr = (T[]) Array.newInstance(clazz, om.size());
-            for (int i = 0; i < om.size(); i++)
-                arr[i] = om.get(String.valueOf(i), clazz);
+            if (isDefault(clazz)) throw new RuntimeException("Do not use 'getArray()' for primitives, instead use a dedicated function for the desired type ex. 'getIntArr()', 'get(<key>, int[].class)' or 'getObjectArray(<key>, int[].class)'");
+            List<String> s = getCutArr(key);
+            T[] arr = (T[]) Array.newInstance(clazz, s.size());
+            for (int i = 0; i < arr.length; i++) arr[i] = parseTo(s.get(i), clazz);
             return arr;
         }
+
         public Object[] getArray(String key) {
-            ObjectiveMap om = this.getObjectiveMap(key);
+            ObjectiveMap om = this.toMap(key);
             Object[] arr = new Object[om.size()];
             for (int i = 0; i < om.size(); i++)
                 for (Class<?> c : DEFAULT_CLASSES)
                     try {
-                        arr[i] = cast(c, om.get(String.valueOf(i)));
+                        arr[i] = om.get(String.valueOf(i), c);
                         break;
                     } catch (ClassCastException ignored) {}
             return arr;
         }
 
+        private @NotNull List<String> getCutArr(String key) {
+            String raw = getRaw(key);
+            return smartSplit(raw.substring(1, raw.length()-1), ',');
+        }
+
+        public String getRaw(String key) { return this.get(key); }
+
         public String getString(String s) {
-            String rs = (String) this.get(s);
-            if (rs.charAt(0) == '\"') rs = rs.substring(1, rs.length()-1);
+            String rs = this.get(s);
+            if (rs != null && rs.charAt(0) == '\"') rs = rs.substring(1, rs.length()-1);
             return rs;
         }
-        public String[] getStringArr(String s) {
-            ObjectiveMap om = this.getObjectiveMap(s);
-            String[] arr = new String[om.size()];
-            for (int i = 0; i < om.size(); i++)
-                arr[i] = om.getString(String.valueOf(i));
-            return arr;
-        }
-        public List<String> getStringList(String s) { return Arrays.asList(((String) this.get(s)).split(",")); }
-
-        public boolean getBoolean(String s) { return Boolean.parseBoolean((String) this.get(s)); }
-        public boolean[] getBooleanArr(String s) {
-            ObjectiveMap om = this.getObjectiveMap(s);
-            boolean[] arr = new boolean[om.size()];
-            for (int i = 0; i < om.size(); i++)
-                arr[i] = om.getBoolean(String.valueOf(i));
+        public String[] getStringArr(String key) {
+            List<String> s = getCutArr(key);
+            String[] arr = new String[s.size()];
+            for (int i = 0; i < arr.length; i++) arr[i] = s.get(i);
             return arr;
         }
 
-        public int getInt(String s) { return Integer.parseInt((String) this.get(s)); }
-        public int[] getIntArr(String s) { return this.getObjectiveMap(s).asIntArray(); }
-        public int[] asIntArray() {
-            int[] arr = new int[this.size()];
-            for (int i = 0; i < this.size(); i++)
-                arr[i] = this.getInt(String.valueOf(i));
+        public boolean getBoolean(String s) { return Boolean.parseBoolean(this.get(s)); }
+        public boolean[] getBooleanArr(String key) {
+            List<String> s = getCutArr(key);
+            boolean[] arr = new boolean[s.size()];
+            for (int i = 0; i < arr.length; i++) arr[i] = parseTo(s.get(i), boolean.class);
             return arr;
         }
 
-        public long getLong(String s) { return Long.parseLong((String) this.get(s)); }
-        public long[] getLongArr(String s) { return this.getObjectiveMap(s).asLongArray(); }
-        public long[] asLongArray() {
-            long[] arr = new long[this.size()];
-            for (int i = 0; i < this.size(); i++)
-                arr[i] = this.getLong(String.valueOf(i));
+        public int getInt(String s) { return Integer.parseInt(this.get(s)); }
+        public int[] getIntArr(String key) {
+            List<String> s = getCutArr(key);
+            int[] arr = new int[s.size()];
+            for (int i = 0; i < arr.length; i++) arr[i] = parseTo(s.get(i), int.class);
             return arr;
         }
 
-        public float getFloat(String s) { return Float.parseFloat((String) this.get(s)); }
-        public float[] getFloatArr(String s) { return this.getObjectiveMap(s).asFloatArray(); }
-        public float[] asFloatArray() {
-            float[] arr = new float[this.size()];
-            for (int i = 0; i < this.size(); i++)
-                arr[i] = this.getFloat(String.valueOf(i));
+        public long getLong(String s) { return Long.parseLong(this.get(s)); }
+        public long[] getLongArr(String key) {
+            List<String> s = getCutArr(key);
+            long[] arr = new long[s.size()];
+            for (int i = 0; i < arr.length; i++) arr[i] = parseTo(s.get(i), long.class);
             return arr;
         }
 
-        public double getDouble(String s) { return Double.parseDouble((String) this.get(s)); }
-        public double[] getDoubleArr(String s) { return this.getObjectiveMap(s).asDoubleArray(); }
-        public double[] asDoubleArray() {
-            double[] arr = new double[this.size()];
-            for (int i = 0; i < this.size(); i++)
-                arr[i] = this.getDouble(String.valueOf(i));
+        public float getFloat(String s) { return Float.parseFloat(this.get(s)); }
+        public float[] getFloatArr(String key) {
+            List<String> s = getCutArr(key);
+            float[] arr = new float[s.size()];
+            for (int i = 0; i < arr.length; i++) arr[i] = parseTo(s.get(i), float.class);
             return arr;
         }
 
-        public short getShort(String s) { return Short.parseShort((String) this.get(s)); }
-        public short[] getShortArr(String s) { return this.getObjectiveMap(s).asShortArray(); }
-        public short[] asShortArray() {
-            short[] arr = new short[this.size()];
-            for (int i = 0; i < this.size(); i++)
-                arr[i] = this.getShort(String.valueOf(i));
+        public double getDouble(String s) { return Double.parseDouble(this.get(s)); }
+        public double[] getDoubleArr(String key) {
+            List<String> s = getCutArr(key);
+            double[] arr = new double[s.size()];
+            for (int i = 0; i < arr.length; i++) arr[i] = parseTo(s.get(i), double.class);
             return arr;
         }
 
-        public byte getByte(String s) { return Byte.parseByte((String) this.get(s)); }
-        public byte[] getByteArr(String s) {
-            ObjectiveMap om = this.getObjectiveMap(s);
-            byte[] arr = new byte[om.size()];
-            for (int i = 0; i < om.size(); i++)
-                arr[i] = om.getByte(String.valueOf(i));
-            return arr;
-        }
-        public byte[] asByteArray() {
-            byte[] arr = new byte[this.size()];
-            for (int i = 0; i < this.size(); i++)
-                arr[i] = this.getByte(String.valueOf(i));
+        public short getShort(String s) { return Short.parseShort(this.get(s)); }
+        public short[] getShortArr(String key) {
+            List<String> s = getCutArr(key);
+            short[] arr = new short[s.size()];
+            for (int i = 0; i < arr.length; i++) arr[i] = parseTo(s.get(i), short.class);
             return arr;
         }
 
-        public char getChar(String s) {
-            String value = (String) this.get(s);
-            if (value.length() != 1)
-                throw new IllegalArgumentException("String value is not a single character= " + value);
-            return value.charAt(0);
-        }
-
-        public UUID getUUID(String s) { return UUID.fromString((String) this.get(s)); }
-        public UUID[] getUUIDArr(String s) { return this.getObjectiveMap(s).asUUIDArray(); }
-        public UUID[] asUUIDArray() {
-            UUID[] arr = new UUID[this.size()];
-            for (int i = 0; i < this.size(); i++)
-                arr[i] = this.getUUID(String.valueOf(i));
+        public byte getByte(String s) { return Byte.parseByte(this.get(s)); }
+        public byte[] getByteArr(String key) {
+            List<String> s = getCutArr(key);
+            byte[] arr = new byte[s.size()];
+            for (int i = 0; i < arr.length; i++) arr[i] = parseTo(s.get(i), byte.class);
             return arr;
         }
 
-        public java.math.BigInteger getBigInteger(String s) { return new java.math.BigInteger((String) this.get(s)); }
-
-        public java.math.BigDecimal getBigDecimal(String s) { return new java.math.BigDecimal((String) this.get(s)); }
-
-        public ObjectiveMap getObjectiveMap(String s) { return (ObjectiveMap) this.get(s); }
-
-        <T> T getAs(String s, @NotNull MapToObjectFunction<T> func) { return func.create(this.getObjectiveMap(s)); }
-        <T> T getAs(String key, Class<T> clazz) {
-            if (isDefault(clazz)) return get(key, clazz);
-            else if (this.get(key) instanceof ObjectiveMap om) return mapAsClass(om, clazz);
-            else return mapAsClass(new ObjectiveMap("value", this.get(key)), clazz);
-        }
-
-        public <T> List<T> getList(String key, MapToObjectFunction<T> func) {
-            ObjectiveMap om = this.getObjectiveMap(key);
-            List<T> arr = new ArrayList<>();
-            for (int i = 0; i < om.size(); i++)
-                arr.add(om.getAs(String.valueOf(i), func));
-            return arr;
-        }
-        public <T> List<T> getList(String key, Class<T> clazz) {
-            ObjectiveMap om = this.getObjectiveMap(key);
-            List<T> arr = new ArrayList<>();
-            if (isTable(clazz))
-                for (int i = 0; i < om.size(); i++) arr.add((T) om.getList(String.valueOf(i), (Class<?>) ((ParameterizedType) clazz.getGenericSuperclass()).getRawType()));
-            else for (int i = 0; i < om.size(); i++)
-                arr.add(om.getAs(String.valueOf(i), clazz));
-            return arr;
-        }
-        public <T> List<T> getList(String key, @NotNull ParameterizedType clazz) {
-            ObjectiveMap om = this.getObjectiveMap(key);
-            List<T> arr = new ArrayList<>();
-            if (isTable((Class<?>) clazz.getRawType()))
-                for (int i = 0; i < om.size(); i++) arr.add((T) om.getList(String.valueOf(i), clazz.getActualTypeArguments()[0]));
-            else for (int i = 0; i < om.size(); i++)
-                arr.add((T) om.getAs(String.valueOf(i), (Class<?>) clazz.getRawType()));
-            return arr;
-        }
-        public <T> List<T> getList(String key, Type clazz) {
-            ObjectiveMap om = this.getObjectiveMap(key);
-            List<T> arr = new ArrayList<>();
-            for (int i = 0; i < om.size(); i++)
-                arr.add((T) om.getAs(String.valueOf(i), (Class<?>) clazz));
+        public UUID getUUID(String key) { return UUID.fromString(this.get(key)); }
+        public UUID[] getUUIDArr(String key) {
+            List<String> s = getCutArr(key);
+            UUID[] arr = new UUID[s.size()];
+            for (int i = 0; i < arr.length; i++)
+                arr[i] = parseTo(s.get(i), UUID.class);
             return arr;
         }
 
-        public List<ObjectiveMap> getObjectiveList(String key) {
-            ObjectiveMap om = this.getObjectiveMap(key);
-            List<ObjectiveMap> arr = new ArrayList<>();
-            for (int i = 0; i < om.size(); i++)
-                arr.add(om.getObjectiveMap(String.valueOf(i)));
-            return arr;
+        public ObjectiveMap toMap(String s) { return map(this.getRaw(s)); }
+
+        private final Converter<String, ObjectiveMap> stolc = new Converter<>(String.class, ObjectiveMap.class, OODP.this::map);
+        public List<ObjectiveMap> getObjectiveList(String key) { return getList(key, stolc); }
+
+        //TODO fix
+//        public <T> List<T> getList(String key, @NotNull ParameterizedType clazz) {
+//            String raw = getRaw(key);
+//            if (raw.startsWith("{")) raw = raw.substring(1, raw.length()-1);
+//            Class<T> rt = (Class<T>) clazz.getActualTypeArguments()[0];
+//            if (isTable(rt)) return (List<T>) smartSplit(raw, ',').stream().map(s -> stringToList(s, rt)).toList();
+//            else return stringToList(raw, rt);
+//        }
+
+        public Set<?> getSet(String key, Type clazz) { return new HashSet<>(parseList(getRaw(key), (Class<?>) clazz)); }
+        public <T> Set<T> getSet(String key, Class<T> clazz) { return new HashSet<>(parseList(getRaw(key), clazz)); }
+        public <T> Set<T> getSet(String key, Class<T> out, Function<ObjectiveMap, T> c) { return new HashSet<>(getList(key, out, c)); }
+        public <T> Set<T> getSet(String key, Converter<?, T> c) { return new HashSet<>(parseList(getRaw(key), c)); }
+        public <I, T> Set<T> getSet(String key, Class<I> in, Class<T> out, Function<I, T> c) { return new HashSet<>(getList(key, in, out, c)); }
+
+        public List<?> getList(String key, Type clazz) { return parseList(getRaw(key), (Class<?>) clazz); }
+        public <T> List<T> getList(String key, Class<T> clazz) { return parseList(getRaw(key), clazz); }
+        public <T> List<T> getList(String key, Class<T> out, Function<ObjectiveMap, T> c) { return parseList(getRaw(key), s -> c.apply(map(s))); }
+        public <T> List<T> getList(String key, Converter<?, T> c) { return parseList(getRaw(key), c); }
+        public <I, T> List<T> getList(String key, Class<I> in, Class<T> out, Function<I, T> c) { return parseList(getRaw(key), s -> c.apply(parseTo(s, in))); }
+
+        public <I, T> List<T> parseList(String raw, Converter<I, T> c) { return parseList(raw, s -> c.f.apply(parseTo(s, c.i))); }
+        public <T> List<T> parseList(String raw, Class<T> out) { return parseList(raw, s -> parseTo(s, out)); }
+        public <T> List<T> parseList(String raw, Function<String, T> f) {
+            if (raw == null) return new ArrayList<>();
+            if (raw.startsWith("[") || raw.startsWith("{")) raw = raw.substring(1, raw.length()-1);
+            return new ArrayList<>(smartSplit(raw, ',').stream().map(f).toList());
         }
 
         @Override
@@ -414,20 +357,26 @@ public class OODP {
                 || ConcurrentNavigableMap.class.isAssignableFrom(clazz);
     }
 
-    private final Map<Class<?>, MapToObjectFunction<?>> create_functions = new HashMap<>();
-    private final Map<Class<?>, MapToObjectFunction<?>> create_extending_functions = new HashMap<>();
-    private final Map<Class<?>, ObjectToOODPFunction<?>> convert_functions = new HashMap<>();
-    private final Map<Class<?>, ObjectToOODPFunction<?>> extending_convert_functions = new HashMap<>();
+
+    private final Map<Class<?>, Converter<?, ?>> create_class = new HashMap<>();
+//    private final Map<Class<?>, Converter<?, ?>> create_class_extending = new HashMap<>();
+    private final Map<Class<?>, Converter<?, ?>> create_fields = new HashMap<>();
+//    private final Map<Class<?>, Converter<?, ?>> create_fields_extending = new HashMap<>();
+
+    private final Map<Class<?>, Converter<?, ?>> convert_class = new HashMap<>();
+    private final Map<Class<?>, Converter<?, ?>> convert_class_extending = new HashMap<>();
+    private final Map<Class<?>, Converter<?, ?>> convert_field = new HashMap<>();
+    private final Map<Class<?>, Converter<?, ?>> convert_field_extending = new HashMap<>();
     private final Map<Class<?>, List<Field>> excluded_fields = new HashMap<>();
-    private final Map<Class<?>, Class<?>> process_as_class = new HashMap<>();
-    private final Map<Class<?>, ObjectToOODPFunction<?>> extending_field = new HashMap<>();
-    private CustomCheckFunction ccf = null;
+    private final Map<Class<?>, Class<?>> process_class_as = new HashMap<>();
     private boolean auto_ex_f = true;
     private boolean ignore_processing = false;
     private boolean ign_np_v = true;
     private boolean log_c = false;
     private boolean urp = true;
+    private int tree_prot = 150;
     private String spacing_string = "    ";
+    private boolean pretty_up = false;
 
     public OODP() {}
 
@@ -436,55 +385,42 @@ public class OODP {
     public void ignoreProcessing(boolean val) { ignore_processing = val; }
     public void urProtection(boolean val) { this.urp = val; }
     public void setPrettySpacingString(String space) { spacing_string = space; }
+    public void setTreeProt(int v) { tree_prot = v; }
+    public void pretty(boolean v) { pretty_up = v; }
 
-    public interface CustomCheckFunction { Class<?> processAs(Object o); }
+    public <I, T> void createClass(Class<I> in, Class<T> out, Function<I, T> func) { create_class.put(out, new Converter<>(in, out, func)); }
+    public <T> void createClass(Class<T> out, Function<ObjectiveMap, T> func) { create_class.put(out, new Converter<>(ObjectiveMap.class, out, func)); }
+//    public <I, T> void createClassExtending(Class<I> in, Class<T> out, Function<I, T> func) { create_class_extending.put(out, new Converter<>(in, out, func)); }
+//    public <T> void createClassExtending(Class<T> out, Function<ObjectiveMap, T> func) { create_class_extending.put(out, new Converter<>(ObjectiveMap.class, out, func)); }
 
-    public void customCheck(CustomCheckFunction c) { ccf = c; }
+    public <I> void convertClass(Class<I> in, Function<I, Object> func) { convert_class.put(in, new Converter<>(in, Object.class, func)); }
+    public <I> void convertClassExtending(Class<I> in, Function<I, Object> func) { convert_class_extending.put(in, new Converter<>(in, Object.class, func)); }
 
-    public <T> void createClassFunc(Class<T> clazz, MapToObjectFunction<T> func) { create_functions.put(clazz, func); }
-    public <T> void createClassFunc(String clazz, MapToObjectFunction<T> func) {
-        try {
-            createClassFunc((Class<T>) Class.forName(clazz), func);
-        } catch (ClassNotFoundException e) { throw new RuntimeException(e); }
-    }
 
-    public <T> void createClassExtendingFunc(Class<T> clazz, MapToObjectFunction<T> func) { create_extending_functions.put(clazz, func); }
+    public <I, T> void createFields(Class<I> in, Class<T> out, Function<I, T> func) { create_fields.put(out, new Converter<>(in, out, func)); }
+    public <T> void createFields(Class<T> out, Function<ObjectiveMap, T> func) { create_fields.put(out, new Converter<>(ObjectiveMap.class, out, func)); }
 
-    public <T> void convertClassFunc(Class<T> clazz, ObjectToOODPFunction<T> func) { convert_functions.put(clazz, func); }
-    public <T> void hashConvertClassFunc(Class<T> clazz, ObjectToHashMapFunction<T> func) { convert_functions.put(clazz, func); }
-    public <T> void convertClassFunc(String clazz, ObjectToOODPFunction<T> func) {
-        try {
-            convertClassFunc((Class<T>) Class.forName(clazz), func);
-        } catch (ClassNotFoundException e) { throw new RuntimeException(e); }
-    }
-    public <T> void hashConvertClassFunc(String clazz, ObjectToHashMapFunction<T> func) {
-        try {
-            convertClassFunc((Class<T>) Class.forName(clazz), func);
-        } catch (ClassNotFoundException e) { throw new RuntimeException(e); }
-    }
-
-    public <T> void convertClassExtendingFunc(Class<T> clazz, ObjectToOODPFunction<T> func) { extending_convert_functions.put(clazz, func); }
-    public <T> void hashConvertClassExtendingFunc(Class<T> clazz, ObjectToHashMapFunction<T> func) { extending_convert_functions.put(clazz, func); }
-    public <T> void convertClassExtendingFunc(String clazz, ObjectToOODPFunction<T> func) {
-        try {
-            convertClassExtendingFunc((Class<T>) Class.forName(clazz), func);
-        } catch (ClassNotFoundException e) { throw new RuntimeException(e); }
-    }
-    public <T> void hashConvertClassExtendingFunc(String clazz, ObjectToHashMapFunction<T> func) {
-        try {
-            hashConvertClassExtendingFunc((Class<T>) Class.forName(clazz), func);
-        } catch (ClassNotFoundException e) { throw new RuntimeException(e); }
-    }
+    public <I> void convertFields(Class<I> in, Function<I, Object> func) { convert_field.put(in, new Converter<>(in, Object.class, func)); }
+    public <I> void convertFieldsExtending(Class<I> in, Function<I, Object> func) { convert_field_extending.put(in, new Converter<>(in, Object.class, func)); }
 
     public void excludeFieldsFor(Class<?> clazz, String @NotNull ... field_names) {
         List<Field> fields = new ArrayList<>();
         for (String s : field_names)
             try {
-                fields.add(clazz.getDeclaredField(s));
-            } catch (NoSuchFieldException e) {
-                throw new RuntimeException(e);
+                fields.add(getField(clazz, s));
+            } catch (RuntimeException e) {
+                if (clazz.getSuperclass() != null)
+                    fields.add(getField(clazz.getSuperclass(), s));
+                else throw new RuntimeException(e);
             }
         excludeFieldsFor(clazz, fields);
+    }
+    public static @NotNull Field getField(@NotNull Class<?> c, String name) {
+        try {
+            return c.getDeclaredField(name);
+        } catch (NoSuchFieldException e) {
+            throw new RuntimeException(e);
+        }
     }
     public void excludeFieldsFor(Class<?> clazz, Field... fields) { excludeFieldsFor(clazz, Arrays.asList(fields)); }
     public void excludeFieldsFor(Class<?> clazz, List<Field> fields) {
@@ -502,32 +438,30 @@ public class OODP {
         } catch (ClassNotFoundException e) { throw new RuntimeException(e); }
     }
 
-    public void processAs(Class<?> clazz, Class<?> as) {
+    public void processClassAs(Class<?> clazz, Class<?> as) {
         if (clazz == null)
             throw new RuntimeException("clazz can't be null");
         if (as == null)
             throw new RuntimeException("as class can't be null");
-        if (as.isAssignableFrom(clazz)) process_as_class.put(clazz, as);
+        if (as.isAssignableFrom(clazz)) process_class_as.put(clazz, as);
         else if (!ignore_processing)
             throw new RuntimeException(new ClassCastException(as.getName() + " can't be cast to " + clazz.getName()));
     }
-    public void processAs(Class<?> clazz, String as) {
+    public void processClasAs(Class<?> clazz, String as) {
         try {
-            processAs(clazz, Class.forName(as));
+            processClassAs(clazz, Class.forName(as));
         } catch (ClassNotFoundException e) { throw new RuntimeException(e); }
     }
-    public void processAs(String clazz, Class<?> as) {
+    public void processClasAs(String clazz, Class<?> as) {
         try {
-            processAs(Class.forName(clazz), as);
+            processClassAs(Class.forName(clazz), as);
         } catch (ClassNotFoundException e) { throw new RuntimeException(e); }
     }
-    public void processAs(String clazz, String as) {
+    public void processClasAs(String clazz, String as) {
         try {
-            processAs(Class.forName(clazz), Class.forName(as));
+            processClassAs(Class.forName(clazz), Class.forName(as));
         } catch (ClassNotFoundException e) { throw new RuntimeException(e); }
     }
-
-    public <T> void processFieldsExtendingClass(Class<T> clazz, ObjectToOODPFunction<T> func) { extending_field.put(clazz, func); }
 
     public void autoExcludeFields(boolean value) { auto_ex_f = value; }
 
@@ -536,17 +470,42 @@ public class OODP {
         if (clazz.getSuperclass() != null)
             fields.addAll(getFieldsFor(clazz.getSuperclass()));
         List<Field> excluded = excluded_fields.get(clazz);
-        fields = fields.stream().filter(f -> !(f.isAnnotationPresent(OODPExclude.class) ||  (excluded != null && excluded.contains(f)))).toList();
+        fields = fields.stream().filter(f -> !(f.isAnnotationPresent(OODPExclude.class) || (excluded != null && excluded.contains(f)))).toList();
         return fields;
     }
 
     //TODO fix when there are more that 10 objects in a Map<Object, ?>
-    public <T> T mapAsClass(ObjectiveMap om, Class<T> clazz) {
+    public <I, T> T parseTo(String raw, Class<T> clazz) {
+        if (raw == null) return null;
+        Converter<I, T> cv = (Converter<I, T>) create_class.get(clazz);
+//        if (cv == null) cv = (Converter<I, T>) create_class_extending.get(getFirstExtending(create_class_extending.keySet(), clazz));
+        if (cv != null) {
+            return cv.f.apply(parseTo(raw, cv.i));
+        } else if (isDefault(clazz)) {
+            Object o = raw;
+            if (clazz == String.class) o = raw.substring(1, raw.length()-1);
+            else if (clazz == int.class || clazz == Integer.class) o = Integer.parseInt(raw);
+            else if (clazz == double.class || clazz == Double.class) o = Double.parseDouble(raw);
+            else if (clazz == long.class || clazz == Long.class) o = Long.parseLong(raw);
+            else if (clazz == boolean.class || clazz == Boolean.class) o = Boolean.parseBoolean(raw);
+            else if (clazz == float.class || clazz == Float.class) o = Float.parseFloat(raw);
+            else if (clazz == char.class || clazz == Character.class) o = raw.charAt(0);
+            else if (clazz == byte.class || clazz == Byte.class) o = Byte.parseByte(raw);
+            else if (clazz == short.class || clazz == Short.class) o = Short.parseShort(raw);
+            else if (clazz == UUID.class) o = UUID.fromString(raw);
+            return (T) o;
+        } else if (clazz == ObjectiveMap.class) {
+            return (T) map(raw);
+        } else return parseMapTo(map(raw), clazz);
+    }
+
+    public <I, T> T parseMapTo(ObjectiveMap om, Class<T> clazz) {
         if (om == null) return null;
-        if (create_functions.containsKey(clazz)) {
-            return (T) create_functions.get(clazz).create(om);
-        } else if (getFirstExtending(create_extending_functions.keySet(), clazz) != null) {
-            return (T) create_extending_functions.get(getFirstExtending(create_extending_functions.keySet(), clazz)).create(om);
+        if (clazz == ObjectiveMap.class) return (T) om;
+        Converter<I, T> cv = (Converter<I, T>) create_class.get(clazz);
+//        if (cv == null) cv = (Converter<I, T>) create_class_extending.get(getFirstExtending(create_class_extending.keySet(), clazz));
+        if (cv != null) {
+            return cv.f.apply(om.as(cv.i));
         } else {
             if (clazz == Object.class) return (T) om;
             try {
@@ -561,14 +520,16 @@ public class OODP {
                         f.setAccessible(true);
                         if (!Modifier.isStatic(f.getModifiers())) {
                             Class<?> ft = f.getType();
-                            if (isTable(ft)) {
+                            Converter<I, T> fcv = (Converter<I, T>) create_fields.get(ft);
+                            if (fcv != null) f.set(instance, fcv.f.apply(om.get(fn, fcv.i)));
+                            else if (isTable(ft)) {
                                 if (f.getGenericType() instanceof Class<?> cpt && cpt.getComponentType() != null)
                                     f.set(instance, om.getObjectArray(fn, cpt.getComponentType()));
-                                else {
-                                    Type type = ((ParameterizedType) f.getGenericType()).getActualTypeArguments()[0];
+                                else if (f.getGenericType() instanceof ParameterizedType pt) {
+                                    Type type = pt.getActualTypeArguments()[0];
                                     if (type instanceof ParameterizedType para_type)
-                                        f.set(instance, om.getList(fn, para_type));
-                                    else f.set(instance, om.getList(fn, type));
+                                        f.set(instance, morphListTo(om.getList(fn, para_type), ft));
+                                    else f.set(instance, morphListTo(om.getList(fn, type), ft));
                                 }
                             } else f.set(instance, om.get(fn, ft));
                         }
@@ -587,10 +548,15 @@ public class OODP {
         }
     }
 
+    public static <T> Object morphListTo(List<T> list, Class<?> clazz) {
+        if (clazz == Set.class) return new HashSet<>(list);
+        return list;
+    }
+
     //Converting objects to strings
     public static class MalformedOODPException extends Exception {  public MalformedOODPException(String s) { super(s); } }
 
-    public boolean saveToFile(Object o, @NotNull File f) { return saveToFile(o, f, false); }
+    public boolean saveToFile(Object o, @NotNull File f) { return saveToFile(o, f, pretty_up); }
     public boolean saveToFile(Object o, @NotNull File f, boolean pretty) {
         byte[] data;
         if (o instanceof byte[] ba) data = ba;
@@ -607,57 +573,52 @@ public class OODP {
         for (Class<?> kc : set)
             if (kc.isAssignableFrom(clazz))
                 return kc;
-        return null;
+        return clazz;
     }
 
+    private String separator = "|   ";
     private Object last_object = null;
     private int orc = 0;
     private int tree_d = 0;
-    public @NotNull String toOodp(Object o) { return toOodp(o, false); }
-    public <T> @NotNull String toOodp(Object o, boolean pretty) {
+    public @NotNull String toOodp(Object o) { return toOodp(o, pretty_up); }
+    public <I, T> @NotNull String toOodp(Object o, boolean pretty) {
         if (o == null) return "null";
+
+        if (tree_prot <= 0 && tree_d >= tree_prot)
+            throw new RuntimeException("A unbounded recursion was detected in the \"toOodp(Object)\" function. toOodp() has called itself " + tree_d + " times, which triggered this protection. Use setTreeProt(int) to raise, lower or disable (put 0 or lower in) this");
         if (urp) {
             if (last_object == o) orc++;
             else orc = 0;
             if (orc >= 10)
                 throw new RuntimeException("A unbounded recursion was detected in the \"toOodp(Object)\" function. This check is in place to prevent a stack overflow." +
-                        "You can disable this check by calling \"urProtection(boolean)\" but BE WARNED OF POSSIBLE STACK OVERFLOWS");
+                        "You can disable this check by calling \"urProtection(false)\"");
             last_object = o;
         }
-        
+
         Class<T> c = (Class<T>) o.getClass();
 
-        if (log_c) System.out.println("|\t".repeat(tree_d)+"Converting " + c + " to String:");
-        tree_d++;
-        if (ccf != null) {
-            Class<?> rc = ccf.processAs(o);
-            if (rc != null) c = (Class<T>) rc;
-        }
+        if (log_c) System.out.println(separator.repeat(tree_d)+"Converting " + c + " " + o + " to String:");
 
-        if (process_as_class.containsKey(c))
-            c = (Class<T>) process_as_class.get(c);
+        tree_d++;
+
+        if (process_class_as.containsKey(c))
+            c = (Class<T>) process_class_as.get(c);
 
         String s;
-        if (convert_functions.containsKey(c)) {
-            ObjectToOODPFunction<T> func = (ObjectToOODPFunction<T>) convert_functions.get(c);
-            if (func instanceof ObjectToHashMapFunction<T> hash)
-                s = toOodp(hash.convert((T) o));
-            else s = toOodp(func.convert((T) o));
-        }
-        else if (getFirstExtending(extending_convert_functions.keySet(), c) != null) {
-            c = (Class<T>) getFirstExtending(extending_convert_functions.keySet(), c);
-            ObjectToOODPFunction<T> func = (ObjectToOODPFunction<T>) extending_convert_functions.get(c);
-            if (func instanceof ObjectToHashMapFunction<T> hash)
-                s = toOodp(hash.convert((T) o));
-            else s = toOodp(func.convert((T) o));
+
+        Converter<I, T> cv = (Converter<I, T>) convert_class.get(c);
+        if (cv == null) cv = (Converter<I, T>) convert_class_extending.get(getFirstExtending(convert_class_extending.keySet(), c));
+        if (cv != null) {
+            if (log_c) System.out.println(separator.repeat(tree_d)+"Found custom conversion for " + c);
+            s = toOodp(cv.f.apply((I) o), false);
         }
         else if (isDefault(c) || isStringable(c)) {
             if (requiresParagraphs(c)) s = "\"" + o + "\"";
             else s = String.valueOf(o);
         }
         else if (o instanceof Enum<?> e) s = e.name();
-        else if (isTable(c)) s = arrayToOodp(o);
-        else if (isMap(c)) s = mapToOodp(o);
+        else if (isTable(c)) s = arrayToOodp(o, false);
+        else if (isMap(c)) s = mapToOodp(o, false);
         else {
             StringBuilder sb = new StringBuilder("{");
             for (Field field : getFieldsFor(c)) {
@@ -667,18 +628,17 @@ public class OODP {
                         field.setAccessible(true);
 
                         if (log_c)
-                            System.out.println("|\t".repeat(tree_d) + "- Converting field " + field.getName() + ":");
+                            System.out.println(separator.repeat(tree_d) + "- Converting field " + field.getName() + ":");
 
                         sb.append(field.getName()).append('=');
                         Object fo = field.get(o);
-                        Class<?> fc = getFirstExtending(extending_field.keySet(), field.getType());
-                        if (fc != null) {
-                            ObjectToOODPFunction<T> func = (ObjectToOODPFunction<T>) extending_field.get(fc);
-                            if (func instanceof ObjectToHashMapFunction<T> hash)
-                                fo = hash.convert((T) fo);
-                            else fo = func.convert((T) fo);
-                        }
-                        sb.append(toOodp(fo));
+
+                        Class<?> fc = field.getType();
+
+                        Converter<T, Object> fcv = (Converter<T, Object>) convert_field.get(fc);
+                        if (fcv == null) fcv = (Converter<T, Object>) convert_field_extending.get(getFirstExtending(convert_field_extending.keySet(), fc));
+                        if (fcv != null) fo = fcv.f.apply((T) fo);
+                        sb.append(toOodp(fo, false));
                         sb.append(',');
 
                         tree_d--;
@@ -693,41 +653,46 @@ public class OODP {
 
                 }
             }
-            if (sb.charAt(sb.length() - 1) != '}') sb.deleteCharAt(sb.length() - 1);
+            if (sb.length() > 1 && sb.charAt(sb.length() - 1) != '}') sb.deleteCharAt(sb.length() - 1);
             s = sb.append("}").toString();
         }
         tree_d--;
         return pretty ? prettyUp(s) : s;
     }
 
-    public @NotNull String arrayToOodp(@NotNull Object array) {
+    public @NotNull String arrayToOodp(@NotNull Object array) { return arrayToOodp(array, pretty_up); }
+    public @NotNull String arrayToOodp(@NotNull Object array, boolean pretty) {
         StringBuilder sb = new StringBuilder("[");
+
         if (array instanceof List<?> list) {
-            for (int i = 0; i < list.size(); i++)
-                sb.append(i).append('=').append(toOodp(list.get(i))).append(',');
+            for (Object o : list) sb.append(toOodp(o, false)).append(',');
+        } else if (array instanceof Set<?> set) {
+            for (Object element : set)
+                sb.append(toOodp(element, false)).append(',');
+        } else if (array instanceof Collection<?> collection) {
+            collection.forEach(e -> sb.append(toOodp(e, false)).append(','));
         } else if (array.getClass().isArray()) {
             for (int i = 0; i < Array.getLength(array); i++)
-                sb.append(i).append('=').append(toOodp(Array.get(array, i))).append(',');
+                sb.append(toOodp(Array.get(array, i), false)).append(',');
         } else throw new IllegalArgumentException("Argument is neither an array nor a List");
 
         if (sb.length() > 1 && sb.charAt(sb.length()-1) != ']') sb.deleteCharAt(sb.length() - 1);
-        return sb.append("]").toString();
+        sb.append("]");
+        return pretty ? prettyUp(sb.toString()) : sb.toString();
     }
 
     //TODO maps are just... wierd. fix it
-    public String mapToOodp(Object o) {
+    public String mapToOodp(Object o) { return mapToOodp(o, pretty_up); }
+    public String mapToOodp(Object o, boolean pretty) {
         if (o instanceof Map<?, ?> map) {
             StringBuilder sb = new StringBuilder("{");
             boolean sk = true;
             Class<?> keyc = map.entrySet().iterator().next().getKey().getClass();
             for (Map.Entry<?, ?> e : map.entrySet())
                 if (e.getKey().getClass() != keyc) { sk = false; break; }
-            int i = 0;
             if (sk) {
-                for (Map.Entry<?, ?> e : map.entrySet()) {
-                    sb.append(e.getKey()).append('=').append(toOodp(e.getValue())).append(',');
-                    i++;
-                }
+                for (Map.Entry<?, ?> e : map.entrySet())
+                    sb.append(e.getKey()).append('=').append(toOodp(e.getValue(), false)).append(',');
             } else {
                 for (Map.Entry<?, ?> e : map.entrySet()) {
                     String k;
@@ -735,18 +700,18 @@ public class OODP {
                     if (isDefault(c)) {
                         k = String.valueOf(e.getKey());
                     } else if (!isStringable(c) && !isTable(c) && !isMap(c)) {
-                        k = '|' + c.getName() + '|' + toOodp(e.getKey());
-                    } else  k = toOodp(e.getKey());
-                    sb.append(k).append('=').append(toOodp(e.getValue())).append(',');
-                    i++;
+                        k = '|' + c.getName() + '|' + toOodp(e.getKey(), false);
+                    } else  k = toOodp(e.getKey(), false);
+                    sb.append(k).append('=').append(toOodp(e.getValue(), false)).append(',');
                 }
             }
             if (sb.length() > 1 && sb.charAt(sb.length()-1) != '}') sb.deleteCharAt(sb.length() - 1);
-            return sb.append('}').toString();
-        } else throw new RuntimeException(new IllegalArgumentException("Object is not a map"));
+            sb.append('}');
+            return pretty ? prettyUp(sb.toString()) : sb.toString();
+        } else throw new IllegalArgumentException("Object is not a map");
     }
 
-    public @NotNull String clean(@NotNull String s) {
+    public static @NotNull String clean(@NotNull String s) {
         StringBuilder sb = new StringBuilder();
         char[] chars = s.toCharArray();
         int i = 0;
@@ -764,7 +729,7 @@ public class OODP {
         return sb.toString();
     }
 
-    public @NotNull List<String> smartSplit(@NotNull String s, char c) {
+    public static @NotNull List<String> smartSplit(@NotNull String s, char c) {
         List<String> sts = new ArrayList<>();
         char[] chars = s.toCharArray();
         int i = 0;
@@ -802,9 +767,11 @@ public class OODP {
         }
     }
 
-    public @NotNull ObjectiveMap map(@NotNull String s) {
+    public ObjectiveMap newMap() { return new ObjectiveMap(); }
+
+    public @NotNull ObjectiveMap map(String s) {
         ObjectiveMap om = new ObjectiveMap();
-        if (s.isEmpty()) return om;
+        if (s == null || s.isEmpty()) return om;
         s = clean(s);
         if (s.charAt(0) == '{') {
             if (s.charAt(s.length()-1) == '}')
@@ -842,13 +809,13 @@ public class OODP {
                     if (chars[chars.length-1] != '}')
                         throw new RuntimeException(new MalformedOODPException(v));
                     override = true;
-                    om.put(k, map(v.substring(1, v.length()-1)));
+                    om.put(k, v);
                     break;
                 } else if (al && cr == '[') {
                     if (chars[chars.length-1] != ']')
                         throw new RuntimeException(new MalformedOODPException(v));
                     override = true;
-                    om.put(k, map(v.substring(1, v.length()-1)));
+                    om.put(k, v);
                     break;
                 } else { al = false; }
                 if (cr == '\"') { p = !p; }
@@ -860,32 +827,34 @@ public class OODP {
         return om;
     }
 
-    public String prettyUp(String oodp) { return prettyUp(oodp, 0); }
-    private @NotNull String prettyUp(@NotNull String oodp, int depth) {
-        depth++;
-        StringBuilder sb;
-        boolean ob = false;
-        boolean ar = false;
-        if (oodp.charAt(0) == '{') {
-            ob = true;
-            oodp = oodp.substring(1, oodp.length()-1);
-            sb = new StringBuilder("{");
-        } else  if (oodp.charAt(0) == '[') {
-            ar = true;
-            oodp = oodp.substring(1, oodp.length()-1);
-            sb = new StringBuilder("[");
-        } else sb = new StringBuilder();
-        for (String s : smartSplit(oodp, ',')) {
-            String[] v = s.split("=", 2);
-            String key = v[0];
-            String value = v[1];
-            if (value.charAt(0) == '{' || value.charAt(0) == '[') value = prettyUp(value, depth);
-            sb.append('\n').append(spacing_string.repeat(depth)).append(key).append(" = ").append(value).append(',');
+    public @NotNull String prettyUp(@NotNull String oodp) {
+        StringBuilder sb = new StringBuilder();
+        int depth = 0;
+        boolean p = false;
+        char cr;
+        char[] c = oodp.toCharArray();
+        int i = 0;
+        while (i < c.length) {
+            cr = c[i];
+            if (!p) while (cr == ' ') {
+                i++;
+                cr = c[i];
+            }
+            if (cr == '\"') p = !p;
+            if (p) sb.append(cr);
+            else {
+                if (cr == '=') sb.append(" = ");
+                else if (cr == ',') sb.append(cr).append('\n').append(spacing_string.repeat(depth));
+                else if (cr == '{' || cr == '[') {
+                    depth++;
+                    sb.append(cr).append('\n').append(spacing_string.repeat(depth));
+                } else if (cr == '}' || cr == ']') {
+                    depth--;
+                    sb.append('\n').append(spacing_string.repeat(depth)).append(cr);
+                } else sb.append(cr);
+            }
+            i++;
         }
-        if (sb.charAt(sb.length()-1) != '}') sb.deleteCharAt(sb.length()-1);
-        sb.append('\n').append(spacing_string.repeat(depth-1));
-        if (ob) sb.append('}');
-        else if (ar) sb.append(']');
         return sb.toString();
     }
 }

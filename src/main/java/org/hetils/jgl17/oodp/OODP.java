@@ -11,13 +11,18 @@ import java.lang.reflect.*;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.file.Files;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentNavigableMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.function.Function;
 
+import static org.hetils.jgl17.General.or;
+
 //TODO create readable oodp strings (Object Oriented Data Preserving)
+@SuppressWarnings("unchecked")
 public class OODP {
     public static class Converter<I, T> {
         private Class<I> i;
@@ -47,7 +52,8 @@ public class OODP {
 
         public <I, T> T as(@NotNull Converter<I, T> c) { return c.f.apply(this.as(c.i)); }
 
-        public <T> T as(Class<T> clazz) { return parseMapTo(this, clazz); }
+        public <T> T as(Class<T> clazz) { return as(clazz, false); }
+        public <T> T as(Class<T> clazz, boolean auto) { return auto ? omToClass(this, clazz) : parseMapTo(this, clazz); }
 
         public <K, V> HashMap<K, V> asHashMap(Class<K> keyc, Class<V> valc) {
             HashMap<K, V> map = new HashMap<>();
@@ -183,7 +189,13 @@ public class OODP {
             return arr;
         }
 
-        public boolean getBoolean(String s) { return Boolean.parseBoolean(this.get(s)); }
+        public boolean getBoolean(String s) {
+            try {
+                return Boolean.parseBoolean(this.get(s));
+            } catch (Exception e) {
+                return false;
+            }
+        }
         public boolean[] getBooleanArr(String key) {
             List<String> s = getCutArr(key);
             boolean[] arr = new boolean[s.size()];
@@ -191,7 +203,13 @@ public class OODP {
             return arr;
         }
 
-        public int getInt(String s) { return Integer.parseInt(this.get(s)); }
+        public int getInt(String s) {
+            try {
+                return Integer.parseInt(this.get(s));
+            } catch (NumberFormatException e) {
+                return 0;
+            }
+        }
         public int[] getIntArr(String key) {
             List<String> s = getCutArr(key);
             int[] arr = new int[s.size()];
@@ -199,7 +217,13 @@ public class OODP {
             return arr;
         }
 
-        public long getLong(String s) { return Long.parseLong(this.get(s)); }
+        public long getLong(String s) {
+            try {
+                return Long.parseLong(this.get(s));
+            } catch (NumberFormatException e) {
+                return 0L;
+            }
+        }
         public long[] getLongArr(String key) {
             List<String> s = getCutArr(key);
             long[] arr = new long[s.size()];
@@ -207,7 +231,13 @@ public class OODP {
             return arr;
         }
 
-        public float getFloat(String s) { return Float.parseFloat(this.get(s)); }
+        public float getFloat(String s) {
+            try {
+                return Float.parseFloat(this.get(s));
+            } catch (NumberFormatException e) {
+                return 0f;
+            }
+        }
         public float[] getFloatArr(String key) {
             List<String> s = getCutArr(key);
             float[] arr = new float[s.size()];
@@ -215,7 +245,13 @@ public class OODP {
             return arr;
         }
 
-        public double getDouble(String s) { return Double.parseDouble(this.get(s)); }
+        public double getDouble(String s) {
+            try {
+                return Double.parseDouble(this.get(s));
+            } catch (NumberFormatException e) {
+                return 0d;
+            }
+        }
         public double[] getDoubleArr(String key) {
             List<String> s = getCutArr(key);
             double[] arr = new double[s.size()];
@@ -223,7 +259,13 @@ public class OODP {
             return arr;
         }
 
-        public short getShort(String s) { return Short.parseShort(this.get(s)); }
+        public short getShort(String s) {
+            try {
+                return Short.parseShort(this.get(s));
+            } catch (NumberFormatException e) {
+                return 0;
+            }
+        }
         public short[] getShortArr(String key) {
             List<String> s = getCutArr(key);
             short[] arr = new short[s.size()];
@@ -231,7 +273,13 @@ public class OODP {
             return arr;
         }
 
-        public byte getByte(String s) { return Byte.parseByte(this.get(s)); }
+        public byte getByte(String s) {
+            try {
+                return Byte.parseByte(this.get(s));
+            } catch (NumberFormatException e) {
+                return 0;
+            }
+        }
         public byte[] getByteArr(String key) {
             List<String> s = getCutArr(key);
             byte[] arr = new byte[s.size()];
@@ -239,7 +287,13 @@ public class OODP {
             return arr;
         }
 
-        public UUID getUUID(String key) { return UUID.fromString(this.get(key)); }
+        public UUID getUUID(String key) {
+            try {
+                return UUID.fromString(this.get(key));
+            } catch (Exception e) {
+                return null;
+            }
+        }
         public UUID[] getUUIDArr(String key) {
             List<String> s = getCutArr(key);
             UUID[] arr = new UUID[s.size()];
@@ -283,7 +337,7 @@ public class OODP {
         }
 
         @Override
-        public String toString() { return "{" + String.join(",", this.entrySet().stream().map(e -> e.getKey() + "=" + e.getValue().toString()).toList()) + "}"; }
+        public String toString() { return "{" + String.join(",", this.entrySet().stream().map(e -> e.getKey() + "=" + e.getValue()).toList()) + "}"; }
         public byte[] getBytes() { return this.toString().getBytes(); }
     }
 
@@ -359,14 +413,15 @@ public class OODP {
 
 
     private final Map<Class<?>, Converter<?, ?>> create_class = new HashMap<>();
-//    private final Map<Class<?>, Converter<?, ?>> create_class_extending = new HashMap<>();
+    private final Map<Class<?>, Converter<?, ?>> create_class_extending = new HashMap<>();
     private final Map<Class<?>, Converter<?, ?>> create_fields = new HashMap<>();
-//    private final Map<Class<?>, Converter<?, ?>> create_fields_extending = new HashMap<>();
+    private final Map<Class<?>, Converter<?, ?>> create_fields_extending = new HashMap<>();
 
-    private final Map<Class<?>, Converter<?, ?>> convert_class = new HashMap<>();
-    private final Map<Class<?>, Converter<?, ?>> convert_class_extending = new HashMap<>();
-    private final Map<Class<?>, Converter<?, ?>> convert_field = new HashMap<>();
-    private final Map<Class<?>, Converter<?, ?>> convert_field_extending = new HashMap<>();
+    private final Map<Class<?>, Converter<?, Object>> convert_class = new HashMap<>();
+    private final Map<Class<?>, Converter<?, Object>> convert_class_extending = new HashMap<>();
+    private final Map<Field, Converter<?, Object>> convert_field = new HashMap<>();
+    private final Map<Class<?>, Converter<?, Object>> convert_fields = new HashMap<>();
+    private final Map<Class<?>, Converter<?, Object>> convert_field_extending = new HashMap<>();
     private final Map<Class<?>, List<Field>> excluded_fields = new HashMap<>();
     private final Map<Class<?>, Class<?>> process_class_as = new HashMap<>();
     private boolean auto_ex_f = true;
@@ -374,24 +429,25 @@ public class OODP {
     private boolean ign_np_v = true;
     private boolean log_c = false;
     private boolean urp = true;
-    private int tree_prot = 150;
+    private int tree_prot = 100;
     private String spacing_string = "    ";
     private boolean pretty_up = false;
 
     public OODP() {}
+    public OODP(boolean pretty) { this.pretty_up = pretty; }
 
     public void logConversions(boolean val) { log_c = val; }
     public void ignoreMissingValues(boolean val) { ign_np_v = val; }
     public void ignoreProcessing(boolean val) { ignore_processing = val; }
     public void urProtection(boolean val) { this.urp = val; }
     public void setPrettySpacingString(String space) { spacing_string = space; }
-    public void setTreeProt(int v) { tree_prot = v; }
+    public void treeProtection(int v) { tree_prot = v; }
     public void pretty(boolean v) { pretty_up = v; }
 
     public <I, T> void createClass(Class<I> in, Class<T> out, Function<I, T> func) { create_class.put(out, new Converter<>(in, out, func)); }
     public <T> void createClass(Class<T> out, Function<ObjectiveMap, T> func) { create_class.put(out, new Converter<>(ObjectiveMap.class, out, func)); }
-//    public <I, T> void createClassExtending(Class<I> in, Class<T> out, Function<I, T> func) { create_class_extending.put(out, new Converter<>(in, out, func)); }
-//    public <T> void createClassExtending(Class<T> out, Function<ObjectiveMap, T> func) { create_class_extending.put(out, new Converter<>(ObjectiveMap.class, out, func)); }
+    public <I, T> void createClassExtending(Class<I> in, Class<T> out, Function<I, T> func) { create_class_extending.put(out, new Converter<>(in, out, func)); }
+    public <T> void createClassExtending(Class<T> out, Function<ObjectiveMap, T> func) { create_class_extending.put(out, new Converter<>(ObjectiveMap.class, out, func)); }
 
     public <I> void convertClass(Class<I> in, Function<I, Object> func) { convert_class.put(in, new Converter<>(in, Object.class, func)); }
     public <I> void convertClassExtending(Class<I> in, Function<I, Object> func) { convert_class_extending.put(in, new Converter<>(in, Object.class, func)); }
@@ -399,8 +455,10 @@ public class OODP {
 
     public <I, T> void createFields(Class<I> in, Class<T> out, Function<I, T> func) { create_fields.put(out, new Converter<>(in, out, func)); }
     public <T> void createFields(Class<T> out, Function<ObjectiveMap, T> func) { create_fields.put(out, new Converter<>(ObjectiveMap.class, out, func)); }
+    public <T> void createFieldsExtending(Class<T> out, Function<ObjectiveMap, T> func) { create_fields_extending.put(out, new Converter<>(ObjectiveMap.class, out, func)); }
+    public <I, T> void createFieldsExtending(Class<I> in, Class<T> out, Function<I, T> func) { create_fields_extending.put(out, new Converter<>(in, out, func)); }
 
-    public <I> void convertFields(Class<I> in, Function<I, Object> func) { convert_field.put(in, new Converter<>(in, Object.class, func)); }
+    public <I> void convertFields(Class<I> in, Function<I, Object> func) { convert_fields.put(in, new Converter<>(in, Object.class, func)); }
     public <I> void convertFieldsExtending(Class<I> in, Function<I, Object> func) { convert_field_extending.put(in, new Converter<>(in, Object.class, func)); }
 
     public void excludeFieldsFor(Class<?> clazz, String @NotNull ... field_names) {
@@ -436,6 +494,19 @@ public class OODP {
         try {
             excludeFieldsFor(Class.forName(clazz), fields);
         } catch (ClassNotFoundException e) { throw new RuntimeException(e); }
+    }
+
+    public <I> void convertField(@NotNull Field field, Class<I> f_type, Function<I, Object> func) {
+        if (field.getType() != f_type)
+            throw new IllegalArgumentException("Class " + f_type.getName() + " is not field type of " + field.getDeclaringClass().getName( ) + "$" + field.getName());
+        convert_field.put(field, new Converter<>(f_type, Object.class, func));
+    }
+    public <I> void convertField(@NotNull Class<?> clazz, String field, Class<I> f_type, Function<I, Object> func) {
+        try {
+            convertField(clazz.getDeclaredField(field), f_type, func);
+        } catch (NoSuchFieldException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     public void processClassAs(Class<?> clazz, Class<?> as) {
@@ -477,11 +548,9 @@ public class OODP {
     //TODO fix when there are more that 10 objects in a Map<Object, ?>
     public <I, T> T parseTo(String raw, Class<T> clazz) {
         if (raw == null) return null;
-        Converter<I, T> cv = (Converter<I, T>) create_class.get(clazz);
-//        if (cv == null) cv = (Converter<I, T>) create_class_extending.get(getFirstExtending(create_class_extending.keySet(), clazz));
-        if (cv != null) {
-            return cv.f.apply(parseTo(raw, cv.i));
-        } else if (isDefault(clazz)) {
+        Converter<I, T> cv = (Converter<I, T>) or(create_class.get(clazz), create_class_extending.get(getFirstExtending(create_class_extending.keySet(), clazz)));
+        if (cv != null) return cv.f.apply(parseTo(raw, cv.i));
+        else if (isDefault(clazz)) {
             Object o = raw;
             if (clazz == String.class) o = raw.substring(1, raw.length()-1);
             else if (clazz == int.class || clazz == Integer.class) o = Integer.parseInt(raw);
@@ -502,49 +571,50 @@ public class OODP {
     public <I, T> T parseMapTo(ObjectiveMap om, Class<T> clazz) {
         if (om == null) return null;
         if (clazz == ObjectiveMap.class) return (T) om;
-        Converter<I, T> cv = (Converter<I, T>) create_class.get(clazz);
-//        if (cv == null) cv = (Converter<I, T>) create_class_extending.get(getFirstExtending(create_class_extending.keySet(), clazz));
-        if (cv != null) {
-            return cv.f.apply(om.as(cv.i));
-        } else {
-            if (clazz == Object.class) return (T) om;
-            try {
-                T instance = clazz.getDeclaredConstructor().newInstance();
-                for (Field f : getFieldsFor(clazz)) {
-                    String fn = f.getName();
-                    if (!om.has(fn)) {
-                        if (ign_np_v) continue;
-                        else throw new RuntimeException("No key found for field " + fn + " of class " + clazz + " in provided map");
-                    }
-                    try {
-                        f.setAccessible(true);
-                        if (!Modifier.isStatic(f.getModifiers())) {
-                            Class<?> ft = f.getType();
-                            Converter<I, T> fcv = (Converter<I, T>) create_fields.get(ft);
-                            if (fcv != null) f.set(instance, fcv.f.apply(om.get(fn, fcv.i)));
-                            else if (isTable(ft)) {
-                                if (f.getGenericType() instanceof Class<?> cpt && cpt.getComponentType() != null)
-                                    f.set(instance, om.getObjectArray(fn, cpt.getComponentType()));
-                                else if (f.getGenericType() instanceof ParameterizedType pt) {
-                                    Type type = pt.getActualTypeArguments()[0];
-                                    if (type instanceof ParameterizedType para_type)
-                                        f.set(instance, morphListTo(om.getList(fn, para_type), ft));
-                                    else f.set(instance, morphListTo(om.getList(fn, type), ft));
-                                }
-                            } else f.set(instance, om.get(fn, ft));
-                        }
-                    } catch (ClassCastException e) {
-                        if (auto_ex_f) excludeFieldsFor(clazz, f);
-                        else throw new RuntimeException("Error occurred while setting field " + fn + " of class " + clazz, e);
-                    }
+
+        Converter<I, T> cv = (Converter<I, T>) or(create_class.get(clazz), create_class_extending.get(getFirstExtending(create_class_extending.keySet(), clazz)));
+        if (cv != null) return cv.f.apply(om.as(cv.i));
+        else if (clazz == Object.class) return (T) om;
+        else return omToClass(om, clazz);
+    }
+
+    private <I, T> @NotNull T omToClass(ObjectiveMap om, Class<T> clazz) {
+        try {
+            T instance = clazz.getDeclaredConstructor().newInstance();
+            for (Field f : getFieldsFor(clazz)) {
+                String fn = f.getName();
+                if (!om.has(fn)) {
+                    if (ign_np_v) continue;
+                    else throw new RuntimeException("No key found for field " + fn + " of class " + clazz + " in provided map");
                 }
-                return instance;
-            } catch (NoSuchMethodException e) {
-                //TODO create instance from an existing constructor
-                throw new RuntimeException("Class " + clazz.getName() + " doesn't have a default (parameter-less) constructor.", e);
-            } catch (Exception e) {
-                throw new RuntimeException("Error creating or setting fields for class: " + clazz.getName(), e);
+                try {
+                    f.setAccessible(true);
+                    if (!Modifier.isStatic(f.getModifiers())) {
+                        Class<?> ft = f.getType();
+                        Converter<I, ?> fcv = (Converter<I, ?>) or(create_fields.get(ft), create_fields_extending.get(getFirstExtending(create_fields_extending.keySet(), ft)));
+                        if (fcv != null) f.set(instance, fcv.f.apply(om.get(fn, fcv.i)));
+                        else if (isTable(ft)) {
+                            if (f.getGenericType() instanceof Class<?> cpt && cpt.getComponentType() != null)
+                                f.set(instance, om.getObjectArray(fn, cpt.getComponentType()));
+                            else if (f.getGenericType() instanceof ParameterizedType pt) {
+                                Type type = pt.getActualTypeArguments()[0];
+                                if (type instanceof ParameterizedType para_type)
+                                    f.set(instance, morphListTo(om.getList(fn, para_type), ft));
+                                else f.set(instance, morphListTo(om.getList(fn, type), ft));
+                            }
+                        } else f.set(instance, om.get(fn, ft));
+                    }
+                } catch (ClassCastException e) {
+                    if (auto_ex_f) excludeFieldsFor(clazz, f);
+                    else throw new RuntimeException("Error occurred while setting field " + fn + " of class " + clazz, e);
+                }
             }
+            return instance;
+        } catch (NoSuchMethodException e) {
+            //TODO create instance from an existing constructor
+            throw new RuntimeException("Class " + clazz.getName() + " doesn't have a default (parameter-less) constructor.", e);
+        } catch (Exception e) {
+            throw new RuntimeException("Error creating or setting fields for class: " + clazz.getName(), e);
         }
     }
 
@@ -561,7 +631,7 @@ public class OODP {
         byte[] data;
         if (o instanceof byte[] ba) data = ba;
         else if (o instanceof String s) data = s.getBytes();
-        else data = toOodp(o, pretty).getBytes();
+        else data = idp(o, pretty).getBytes();
         try {
             if (!f.exists() && (!f.createNewFile())) return false;
             try (FileOutputStream outputStream = new FileOutputStream(f)) { outputStream.write(data); }
@@ -577,114 +647,138 @@ public class OODP {
     }
 
     private String separator = "|   ";
-    private Object last_object = null;
-    private int orc = 0;
+
+    private final Set<Object> object_tree = Collections.newSetFromMap(new IdentityHashMap<>());
     private int tree_d = 0;
-    public @NotNull String toOodp(Object o) { return toOodp(o, pretty_up); }
-    public <I, T> @NotNull String toOodp(Object o, boolean pretty) {
+
+    int err_c = 0;
+
+    private final DateTimeFormatter dtf = DateTimeFormatter.ofPattern("[HH:mm:ss]");
+    private @NotNull String time() { return "[" + LocalTime.now().format(dtf) + "]"; }
+
+    public @NotNull String toOodp(Object o) { return toOodp(o, pretty_up, false); }
+    public @NotNull String toOodp(Object o, boolean pretty) { return toOodp(o, pretty, false); }
+    public @NotNull String toOodp(Object o, boolean pretty, boolean auto) {
+        String r = auto ? classToString(o.getClass(), o) : idp(o, pretty);
+        err_c = 0;
+        return r;
+    }
+    private <I, T> @NotNull String idp(Object o, boolean pretty) {
         if (o == null) return "null";
 
-        if (tree_prot <= 0 && tree_d >= tree_prot)
-            throw new RuntimeException("A unbounded recursion was detected in the \"toOodp(Object)\" function. toOodp() has called itself " + tree_d + " times, which triggered this protection. Use setTreeProt(int) to raise, lower or disable (put 0 or lower in) this");
-        if (urp) {
-            if (last_object == o) orc++;
-            else orc = 0;
-            if (orc >= 10)
-                throw new RuntimeException("A unbounded recursion was detected in the \"toOodp(Object)\" function. This check is in place to prevent a stack overflow." +
-                        "You can disable this check by calling \"urProtection(false)\"");
-            last_object = o;
+        if (err_c > 10) {
+            throw new RuntimeException(time() + " [OODP/Warn] More that 10 errors detected during conversion. Class sequence:\n\t" + String.join("\n\t", object_tree.stream().map(ob -> ob.getClass().getName() + " -->").toList()) + "\nStacktrace:");
         }
-
-        Class<T> c = (Class<T>) o.getClass();
-
-        if (log_c) System.out.println(separator.repeat(tree_d)+"Converting " + c + " " + o + " to String:");
 
         tree_d++;
 
-        if (process_class_as.containsKey(c))
-            c = (Class<T>) process_class_as.get(c);
-
-        String s;
-
-        Converter<I, T> cv = (Converter<I, T>) convert_class.get(c);
-        if (cv == null) cv = (Converter<I, T>) convert_class_extending.get(getFirstExtending(convert_class_extending.keySet(), c));
-        if (cv != null) {
-            if (log_c) System.out.println(separator.repeat(tree_d)+"Found custom conversion for " + c);
-            s = toOodp(cv.f.apply((I) o), false);
+        if (tree_prot > 0 && tree_d >= tree_prot) {
+            err_c++;
+            System.out.println(time() + " [OODP/Warn] The function \"internalToOodp(Object)\" has called itself " + tree_d + " times, which triggered this protection. Returning null for object " + o.getClass());
+            tree_d--;
+            return "null";
         }
-        else if (isDefault(c) || isStringable(c)) {
-            if (requiresParagraphs(c)) s = "\"" + o + "\"";
-            else s = String.valueOf(o);
-        }
-        else if (o instanceof Enum<?> e) s = e.name();
-        else if (isTable(c)) s = arrayToOodp(o, false);
-        else if (isMap(c)) s = mapToOodp(o, false);
-        else {
-            StringBuilder sb = new StringBuilder("{");
-            for (Field field : getFieldsFor(c)) {
-                if (!Modifier.isStatic(field.getModifiers()) && !field.getName().startsWith("this$")) {
-                    tree_d++;
-                    try {
-                        field.setAccessible(true);
 
-                        if (log_c)
-                            System.out.println(separator.repeat(tree_d) + "- Converting field " + field.getName() + ":");
-
-                        sb.append(field.getName()).append('=');
-                        Object fo = field.get(o);
-
-                        Class<?> fc = field.getType();
-
-                        Converter<T, Object> fcv = (Converter<T, Object>) convert_field.get(fc);
-                        if (fcv == null) fcv = (Converter<T, Object>) convert_field_extending.get(getFirstExtending(convert_field_extending.keySet(), fc));
-                        if (fcv != null) fo = fcv.f.apply((T) fo);
-                        sb.append(toOodp(fo, false));
-                        sb.append(',');
-
-                        tree_d--;
-                    } catch (IllegalAccessException e) {
-                        tree_d--;
-                        if (auto_ex_f) excludeFieldsFor(c, field);
-                        else {
-                            tree_d = 0;
-                            throw new RuntimeException(e);
-                        }
-                    }
-
-                }
+        if (urp) {
+            if (!object_tree.add(o)) {
+                err_c++;
+                object_tree.remove(o);
+                System.err.println(time() + " [OODP/Warn] A unbounded recursion was detected in the \"internalToOodp(Object)\" function for "+o.getClass().getSimpleName()+". This check is in place to prevent a stack overflow. " +
+                        "You can disable this check by calling \"urProtection(false)\"");
+                tree_d--;
+                return "null";
             }
-            if (sb.length() > 1 && sb.charAt(sb.length() - 1) != '}') sb.deleteCharAt(sb.length() - 1);
-            s = sb.append("}").toString();
         }
-        tree_d--;
-        return pretty ? prettyUp(s) : s;
+
+        try {
+
+            Class<T> c = (Class<T>) o.getClass();
+
+            if (log_c) System.err.println(separator.repeat(tree_d)+"Converting " + c + " " + o + " to String:");
+
+            if (process_class_as.containsKey(c))
+                c = (Class<T>) process_class_as.get(c);
+
+            String s;
+
+            Converter<I, T> cv = (Converter<I, T>) or(convert_class.get(c), convert_class_extending.get(getFirstExtending(convert_class_extending.keySet(), c)));
+            if (cv != null) {
+                if (log_c) System.out.println(separator.repeat(tree_d)+"Found custom conversion for " + c);
+                s = idp(cv.f.apply((I) o), false);
+            } else if (isDefault(c) || isStringable(c)) {
+                s = String.valueOf(o);
+                if (requiresParagraphs(c) && (!s.startsWith("{") || !s.endsWith("}"))) s =  "\"" + s + "\"";
+            } else if (o instanceof Enum<?> e) s = e.name();
+            else if (isTable(c)) s = arrayToOodp(o, false);
+            else if (isMap(c)) s = mapToOodp(o, false);
+            else s = classToString(c, o);
+            return pretty ? prettyUp(s) : s;
+        } finally {
+            tree_d--;
+            object_tree.remove(o);
+        }
     }
 
-    public @NotNull String arrayToOodp(@NotNull Object array) { return arrayToOodp(array, pretty_up); }
-    public @NotNull String arrayToOodp(@NotNull Object array, boolean pretty) {
+    private  <T> String classToString(Class<T> c, Object o) {
+        StringBuilder sb = new StringBuilder("{");
+        for (Field field : getFieldsFor(c)) {
+            if (!Modifier.isStatic(field.getModifiers()) && !field.getName().startsWith("this$")) {
+                try {
+                    field.setAccessible(true);
+                    sb.append(field.getName()).append('=');
+
+                    if (log_c)
+                        System.out.println(separator.repeat(tree_d) + "- Converting field " + field.getName() + ":");
+
+                    Object fo = field.get(o);
+
+                    Converter<T, Object> fcv = (Converter<T, Object>) convert_field.get(field);
+                    if (fcv != null) sb.append(idp(fcv.f.apply((T) fo), false));
+                    else {
+                        Class<?> fc = field.getType();
+
+                        fcv = (Converter<T, Object>) or(convert_fields.get(fc), convert_field_extending.get(getFirstExtending(convert_field_extending.keySet(), fc)));
+                        if (fcv != null) fo = fcv.f.apply((T) fo);
+                        sb.append(idp(fo, false));
+                    }
+                    sb.append(',');
+                } catch (Exception e) {
+                    excludeFieldsFor(c, field);
+                    System.out.println(e.getMessage());
+                }
+            }
+        }
+        if (sb.length() > 1 && sb.charAt(sb.length() - 1) == ',') sb.deleteCharAt(sb.length() - 1);
+        return sb.append("}").toString();
+    }
+
+    private @NotNull String arrayToOodp(@NotNull Object array) { return arrayToOodp(array, pretty_up); }
+    private @NotNull String arrayToOodp(@NotNull Object array, boolean pretty) {
+        if (!isTable(array.getClass())) throw new IllegalArgumentException("Argument is neither an array nor a List/Set/Collection");
+        Collection<Object> elements = (array instanceof Collection<?> collection)
+                ? new ArrayList<>(collection)
+                : null;
+        if (elements == null) {
+            int length = Array.getLength(array);
+            elements = new ArrayList<>(length);
+            for (int i = 0; i < length; i++)
+                elements.add(Array.get(array, i));
+        }
+
         StringBuilder sb = new StringBuilder("[");
+        for (Object element : elements) sb.append(idp(element, false)).append(',');
 
-        if (array instanceof List<?> list) {
-            for (Object o : list) sb.append(toOodp(o, false)).append(',');
-        } else if (array instanceof Set<?> set) {
-            for (Object element : set)
-                sb.append(toOodp(element, false)).append(',');
-        } else if (array instanceof Collection<?> collection) {
-            collection.forEach(e -> sb.append(toOodp(e, false)).append(','));
-        } else if (array.getClass().isArray()) {
-            for (int i = 0; i < Array.getLength(array); i++)
-                sb.append(toOodp(Array.get(array, i), false)).append(',');
-        } else throw new IllegalArgumentException("Argument is neither an array nor a List");
+        if (sb.length() > 1) sb.setCharAt(sb.length() - 1, ']');
+        else sb.append(']');
 
-        if (sb.length() > 1 && sb.charAt(sb.length()-1) != ']') sb.deleteCharAt(sb.length() - 1);
-        sb.append("]");
         return pretty ? prettyUp(sb.toString()) : sb.toString();
     }
 
     //TODO maps are just... wierd. fix it
-    public String mapToOodp(Object o) { return mapToOodp(o, pretty_up); }
-    public String mapToOodp(Object o, boolean pretty) {
+    private String mapToOodp(Object o) { return mapToOodp(o, pretty_up); }
+    private String mapToOodp(Object o, boolean pretty) {
         if (o instanceof Map<?, ?> map) {
+            if (map.isEmpty()) return "{}";
             StringBuilder sb = new StringBuilder("{");
             boolean sk = true;
             Class<?> keyc = map.entrySet().iterator().next().getKey().getClass();
@@ -692,7 +786,7 @@ public class OODP {
                 if (e.getKey().getClass() != keyc) { sk = false; break; }
             if (sk) {
                 for (Map.Entry<?, ?> e : map.entrySet())
-                    sb.append(e.getKey()).append('=').append(toOodp(e.getValue(), false)).append(',');
+                    sb.append(e.getKey()).append('=').append(idp(e.getValue(), false)).append(',');
             } else {
                 for (Map.Entry<?, ?> e : map.entrySet()) {
                     String k;
@@ -700,9 +794,9 @@ public class OODP {
                     if (isDefault(c)) {
                         k = String.valueOf(e.getKey());
                     } else if (!isStringable(c) && !isTable(c) && !isMap(c)) {
-                        k = '|' + c.getName() + '|' + toOodp(e.getKey(), false);
-                    } else  k = toOodp(e.getKey(), false);
-                    sb.append(k).append('=').append(toOodp(e.getValue(), false)).append(',');
+                        k = '|' + c.getName() + '|' + idp(e.getKey(), false);
+                    } else  k = idp(e.getKey(), false);
+                    sb.append(k).append('=').append(idp(e.getValue(), false)).append(',');
                 }
             }
             if (sb.length() > 1 && sb.charAt(sb.length()-1) != '}') sb.deleteCharAt(sb.length() - 1);
@@ -848,7 +942,7 @@ public class OODP {
                 else if (cr == '{' || cr == '[') {
                     depth++;
                     sb.append(cr).append('\n').append(spacing_string.repeat(depth));
-                } else if (cr == '}' || cr == ']') {
+                } else if ((cr == '}' || cr == ']') && depth > 0) {
                     depth--;
                     sb.append('\n').append(spacing_string.repeat(depth)).append(cr);
                 } else sb.append(cr);

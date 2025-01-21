@@ -3,6 +3,8 @@ package org.hetils.jgl17;
 import org.jetbrains.annotations.NotNull;
 
 public class General {
+    public static <T> T or(T t1, T t2) { return t1 != null ? t1 : t2; }
+
     public static final String digits = "0123456789abcdef";
     public static @NotNull String toHex(Object o, int size) {
         o = o != null ? o.toString() : null;

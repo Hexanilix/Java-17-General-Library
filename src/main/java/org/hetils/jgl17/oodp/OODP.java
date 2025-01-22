@@ -130,7 +130,7 @@ public class OODP {
                     else if (clazz == UUID[].class) return (T) getUUIDArr(key);
                     else return (T) getArray(key, clazz.getComponentType());
                 } else if (clazz == ObjectiveMap.class)
-                    return (T) map(getRaw(key));
+                    return (T) OODP.this.map(getRaw(key));
                 else return parseTo(getRaw(key), clazz);
             }
             return null;
@@ -159,7 +159,7 @@ public class OODP {
         }
 
         public Object[] getArray(String key) {
-            ObjectiveMap om = this.toMap(key);
+            ObjectiveMap om = this.map(key);
             Object[] arr = new Object[om.size()];
             for (int i = 0; i < om.size(); i++)
                 for (Class<?> c : DEFAULT_CLASSES)
@@ -302,7 +302,7 @@ public class OODP {
             return arr;
         }
 
-        public ObjectiveMap toMap(String s) { return map(this.getRaw(s)); }
+        public ObjectiveMap map(String s) { return OODP.this.map(this.getRaw(s)); }
 
         private final Converter<String, ObjectiveMap> stolc = new Converter<>(String.class, ObjectiveMap.class, OODP.this::map);
         public List<ObjectiveMap> getObjectiveList(String key) { return getList(key, stolc); }
@@ -324,7 +324,7 @@ public class OODP {
 
         public List<?> getList(String key, Type clazz) { return parseList(getRaw(key), (Class<?>) clazz); }
         public <T> List<T> getList(String key, Class<T> clazz) { return parseList(getRaw(key), clazz); }
-        public <T> List<T> getList(String key, Class<T> out, Function<ObjectiveMap, T> c) { return parseList(getRaw(key), s -> c.apply(map(s))); }
+        public <T> List<T> getList(String key, Class<T> out, Function<ObjectiveMap, T> c) { return parseList(getRaw(key), s -> c.apply(OODP.this.map(s))); }
         public <T> List<T> getList(String key, Converter<?, T> c) { return parseList(getRaw(key), c); }
         public <I, T> List<T> getList(String key, Class<I> in, Class<T> out, Function<I, T> c) { return parseList(getRaw(key), s -> c.apply(parseTo(s, in))); }
 
@@ -604,7 +604,7 @@ public class OODP {
                             }
                         } else f.set(instance, om.get(fn, ft));
                     }
-                } catch (ClassCastException e) {
+                } catch (Exception e) {
                     if (auto_ex_f) excludeFieldsFor(clazz, f);
                     else throw new RuntimeException("Error occurred while setting field " + fn + " of class " + clazz, e);
                 }

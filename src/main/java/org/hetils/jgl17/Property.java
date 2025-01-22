@@ -3,7 +3,7 @@ package org.hetils.jgl17;
 import java.util.*;
 
 public class Property<T> {
-    public static final List<Property> properties = new ArrayList<>();
+    public static final List<Property> properties = new EArrayList<>();
     
     private final String prop;
     private final T defVal;

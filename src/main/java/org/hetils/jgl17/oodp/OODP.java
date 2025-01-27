@@ -332,7 +332,6 @@ public class OODP {
         public <T> List<T> parseList(String raw, Class<T> out) { return parseList(raw, s -> parseTo(s, out)); }
         public <T> List<T> parseList(String raw, Function<String, T> f) {
             if (raw == null) return new ArrayList<>();
-            if (raw.startsWith("[") || raw.startsWith("{")) raw = raw.substring(1, raw.length()-1);
             return new ArrayList<>(smartSplit(raw, ',').stream().map(f).toList());
         }
 
@@ -477,6 +476,9 @@ public class OODP {
         try {
             return c.getDeclaredField(name);
         } catch (NoSuchFieldException e) {
+            for (Field f : getFieldsFor(c))
+                if (f.getName().equals(name))
+                    return f;
             throw new RuntimeException(e);
         }
     }
@@ -536,13 +538,19 @@ public class OODP {
 
     public void autoExcludeFields(boolean value) { auto_ex_f = value; }
 
-    public List<Field> getFieldsFor(@NotNull Class<?> clazz) {
+    public static @NotNull List<Field> getFieldsFor(@NotNull Class<?> clazz) {
         List<Field> fields = new ArrayList<>(List.of(clazz.getDeclaredFields()));
         if (clazz.getSuperclass() != null)
             fields.addAll(getFieldsFor(clazz.getSuperclass()));
-        List<Field> excluded = excluded_fields.get(clazz);
-        fields = fields.stream().filter(f -> !(f.isAnnotationPresent(OODPExclude.class) || (excluded != null && excluded.contains(f)))).toList();
         return fields;
+    }
+
+    public <T> List<Field> filteredFields(Class<T> clazz) {
+        List<Field> fields = getFieldsFor(clazz);
+        List<Field> excluded = excluded_fields.get(clazz);
+        fields = fields.stream().filter(f -> !(f.isAnnotationPresent(OODPExclude.class))).toList();
+        if (excluded != null) return fields.stream().filter(f -> !(excluded.contains(f))).toList();
+        else return fields;
     }
 
     //TODO fix when there are more that 10 objects in a Map<Object, ?>
@@ -551,24 +559,28 @@ public class OODP {
         Converter<I, T> cv = (Converter<I, T>) or(create_class.get(clazz), create_class_extending.get(getFirstExtending(create_class_extending.keySet(), clazz)));
         if (cv != null) return cv.f.apply(parseTo(raw, cv.i));
         else if (isDefault(clazz)) {
-            Object o = raw;
-            if (clazz == String.class) o = raw.substring(1, raw.length()-1);
-            else if (clazz == int.class || clazz == Integer.class) o = Integer.parseInt(raw);
-            else if (clazz == double.class || clazz == Double.class) o = Double.parseDouble(raw);
-            else if (clazz == long.class || clazz == Long.class) o = Long.parseLong(raw);
-            else if (clazz == boolean.class || clazz == Boolean.class) o = Boolean.parseBoolean(raw);
-            else if (clazz == float.class || clazz == Float.class) o = Float.parseFloat(raw);
-            else if (clazz == char.class || clazz == Character.class) o = raw.charAt(0);
-            else if (clazz == byte.class || clazz == Byte.class) o = Byte.parseByte(raw);
-            else if (clazz == short.class || clazz == Short.class) o = Short.parseShort(raw);
-            else if (clazz == UUID.class) o = UUID.fromString(raw);
-            return (T) o;
+            try {
+                Object o = raw;
+                if (clazz == String.class) o = raw.substring(1, raw.length() - 1);
+                else if (clazz == int.class || clazz == Integer.class) o = Integer.parseInt(raw);
+                else if (clazz == double.class || clazz == Double.class) o = Double.parseDouble(raw);
+                else if (clazz == long.class || clazz == Long.class) o = Long.parseLong(raw);
+                else if (clazz == boolean.class || clazz == Boolean.class) o = Boolean.parseBoolean(raw);
+                else if (clazz == float.class || clazz == Float.class) o = Float.parseFloat(raw);
+                else if (clazz == char.class || clazz == Character.class) o = raw.charAt(0);
+                else if (clazz == byte.class || clazz == Byte.class) o = Byte.parseByte(raw);
+                else if (clazz == short.class || clazz == Short.class) o = Short.parseShort(raw);
+                else if (clazz == UUID.class) o = UUID.fromString(raw);
+                return (T) o;
+            } catch (Exception e) {
+                throw new RuntimeException("Can't create " + clazz.getName() + " from " + raw, e);
+            }
         } else if (clazz == ObjectiveMap.class) {
             return (T) map(raw);
         } else return parseMapTo(map(raw), clazz);
     }
 
-    public <I, T> T parseMapTo(ObjectiveMap om, Class<T> clazz) {
+    private  <I, T> T parseMapTo(ObjectiveMap om, Class<T> clazz) {
         if (om == null) return null;
         if (clazz == ObjectiveMap.class) return (T) om;
 
@@ -581,7 +593,7 @@ public class OODP {
     private <I, T> @NotNull T omToClass(ObjectiveMap om, Class<T> clazz) {
         try {
             T instance = clazz.getDeclaredConstructor().newInstance();
-            for (Field f : getFieldsFor(clazz)) {
+            for (Field f : filteredFields(clazz)) {
                 String fn = f.getName();
                 if (!om.has(fn)) {
                     if (ign_np_v) continue;
@@ -619,9 +631,24 @@ public class OODP {
     }
 
     public static <T> Object morphListTo(List<T> list, Class<?> clazz) {
-        if (clazz == Set.class) return new HashSet<>(list);
-        return list;
+        if (clazz == List.class || clazz == ArrayList.class || clazz == Collection.class) {
+            return list;
+        } else if (clazz == Set.class || clazz == HashSet.class) {
+            return new HashSet<>(list);
+        } else if (clazz == LinkedList.class) {
+            return new LinkedList<>(list);
+        } else if (clazz == ArrayDeque.class) {
+            return new ArrayDeque<>(list);
+        } else {
+            try {
+                // Try to instantiate the collection using a constructor that takes a collection
+                return clazz.getConstructor(Collection.class).newInstance(list);
+            } catch (Exception e) {
+                throw new IllegalArgumentException("Unsupported target class: " + clazz.getName(), e);
+            }
+        }
     }
+
 
     //Converting objects to strings
     public static class MalformedOODPException extends Exception {  public MalformedOODPException(String s) { super(s); } }
@@ -721,7 +748,7 @@ public class OODP {
 
     private  <T> String classToString(Class<T> c, Object o) {
         StringBuilder sb = new StringBuilder("{");
-        for (Field field : getFieldsFor(c)) {
+        for (Field field : filteredFields(c)) {
             if (!Modifier.isStatic(field.getModifiers()) && !field.getName().startsWith("this$")) {
                 try {
                     field.setAccessible(true);
@@ -825,6 +852,7 @@ public class OODP {
 
     public static @NotNull List<String> smartSplit(@NotNull String s, char c) {
         List<String> sts = new ArrayList<>();
+        if (s.startsWith("[") || s.startsWith("{")) s = s.substring(1, s.length()-1);
         char[] chars = s.toCharArray();
         int i = 0;
         boolean p = false;
@@ -867,13 +895,7 @@ public class OODP {
         ObjectiveMap om = new ObjectiveMap();
         if (s == null || s.isEmpty()) return om;
         s = clean(s);
-        if (s.charAt(0) == '{') {
-            if (s.charAt(s.length()-1) == '}')
-                s = s.substring(1, s.length()-1);
-        } else if (s.charAt(0) == '[') {
-            if (s.charAt(s.length()-1) == ']')
-                s = s.substring(1, s.length()-1);
-        }
+        if (s.startsWith("[") || s.startsWith("{")) s = s.substring(1, s.length()-1);
         List<String> spl = smartSplit(s, ',');
         for (String st : spl) {
             String k;

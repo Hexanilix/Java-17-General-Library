@@ -13,8 +13,8 @@ public class EArrayList<E> extends java.util.ArrayList<E> {
     public E getFirst() { return this.get(0); }
     public E getLast() { return this.get(this.size()-1); }
 
-    public E removeFirst() { return this.remove(0); }
-    public E removeLast() { return this.remove(this.size()-1); }
+    public E removeFirst() { return !this.isEmpty() ? this.remove(0) : null; }
+    public E removeLast() { return this.size()-1 > -1 ? this.remove(this.size()-1) : null; }
 
     public boolean remove(Object o, boolean from_end) {
         if (from_end) {

@@ -555,7 +555,7 @@ public class OODP {
 
     //TODO fix when there are more that 10 objects in a Map<Object, ?>
     public <I, T> T parseTo(String raw, Class<T> clazz) {
-        if (raw == null) return null;
+        if (raw == null || raw.equals("null")) return null;
         Converter<I, T> cv = (Converter<I, T>) or(create_class.get(clazz), create_class_extending.get(getFirstExtending(create_class_extending.keySet(), clazz)));
         if (cv != null) return cv.f.apply(parseTo(raw, cv.i));
         else if (isDefault(clazz)) {
@@ -590,7 +590,8 @@ public class OODP {
         else return omToClass(om, clazz);
     }
 
-    private <I, T> @NotNull T omToClass(ObjectiveMap om, Class<T> clazz) {
+    private <I, T> T omToClass(ObjectiveMap om, Class<T> clazz) {
+        if (om == null) return null;
         try {
             T instance = clazz.getDeclaredConstructor().newInstance();
             for (Field f : filteredFields(clazz)) {

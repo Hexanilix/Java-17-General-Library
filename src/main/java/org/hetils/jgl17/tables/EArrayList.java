@@ -1,4 +1,4 @@
-package org.hetils.jgl17;
+package org.hetils.jgl17.tables;
 
 import org.jetbrains.annotations.NotNull;
 

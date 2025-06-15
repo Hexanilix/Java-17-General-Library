@@ -1,16 +1,19 @@
-package org.hetils.jgl17;
+package org.hetils.jgl17.tables;
 
+import org.hetils.jgl17.RandomProvider;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Objects;
+import java.util.Random;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-public class NSLinkedHashSet<T> extends LinkedHashSet<T> {
+public class NSLinkedHashSet<T> extends LinkedHashSet<T> implements RandomProvider<T> {
+
+    public static Random rand = new Random();
 
     public NSLinkedHashSet(@NotNull Collection<? extends T> c) { super(c.stream().filter(Objects::nonNull).collect(Collectors.toSet())); }
     public NSLinkedHashSet() { super(); }
@@ -33,4 +36,16 @@ public class NSLinkedHashSet<T> extends LinkedHashSet<T> {
     public @NotNull Stream<T> stream() {
         return super.stream().filter(Objects::nonNull);
     }
+
+    @Override
+    public T rand() {
+        int r = rand.nextInt(this.size());
+        int i = 0;
+        for (T t : this) {
+            if (i == r) return t;
+            i++;
+        }
+        return null;
+    }
+
 }

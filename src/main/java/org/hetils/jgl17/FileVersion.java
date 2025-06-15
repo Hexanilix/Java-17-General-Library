@@ -8,6 +8,10 @@ public class FileVersion {
             super(e);
         }
     }
+
+    public boolean isOlderThan(@NotNull FileVersion fv) { return versionDiff(fv) < 0; }
+    public boolean isNewerThan(@NotNull FileVersion fv) { return versionDiff(fv) > 0; }
+
     /**
      * A function that compares two {@link FileVersion} versions.<br>
      *
@@ -29,6 +33,7 @@ public class FileVersion {
         }
         return 0;
     }
+
     /**
      * A function that compares two {@link FileVersion} versions.<br>
      *

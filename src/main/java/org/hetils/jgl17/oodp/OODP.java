@@ -11,6 +11,7 @@ import java.lang.reflect.*;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -24,6 +25,29 @@ import static org.hetils.jgl17.General.or;
 //TODO create readable oodp strings (Object Oriented Data Preserving)
 @SuppressWarnings("unchecked")
 public class OODP {
+
+    public static Object autoDetect(String s) {
+        if (s == null || s.isEmpty())
+            return null;
+        String trimmed = s.trim();
+        if (s.charAt(0) == '\"') return trimmed.substring(1, trimmed.length()-1);
+        if (trimmed.equalsIgnoreCase("true") || trimmed.equalsIgnoreCase("false"))
+            return Boolean.parseBoolean(trimmed);
+        try {
+            return Integer.parseInt(trimmed);
+        } catch (NumberFormatException ignored) {}
+        try {
+            return Long.parseLong(trimmed);
+        } catch (NumberFormatException ignored) {}
+        try {
+            return Double.parseDouble(trimmed);
+        } catch (NumberFormatException ignored) {}
+        try {
+            return UUID.fromString(s);
+        } catch (Exception ignored) {}
+        return trimmed;
+    }
+
     public static class Converter<I, T> {
         private Class<I> i;
         private Class<T> o;
@@ -40,15 +64,17 @@ public class OODP {
 
     //TODO add get...Or methods
     public class ObjectiveMap extends HashMap<String, String> {
-        //omfg THANK GOD FOR CHATGPT without em I would not have figured of how tf component classes in arrays work,
+        // omfg THANK GOD FOR CHATGPT without em I would not have figured of how tf component classes in arrays work,
         // although I had to figure out myself that if Class<?> is a List it doesn't retain its component
-        // and you gotta pass a ParameterizedType instead said Class<?>. The more you know
+        // and you gotta pass a ParameterizedType instead of said Class<?>. The more you know
 
         public ObjectiveMap() { super(); }
         public ObjectiveMap(Map<? extends String, ? extends String> m) { super(m); }
         public ObjectiveMap(String key, String value) { super(); this.put(key, value); }
 
         public boolean has(String key) { return this.containsKey(key); }
+        public String add(String key) { return this.put(key, ""); }
+        public String add(String key, Object value) { String s; return this.put(key, (s = toOodp(value)).startsWith("\"") ? s.substring(1, s.length()-1) : s); }
 
         public <I, T> T as(@NotNull Converter<I, T> c) { return c.f.apply(this.as(c.i)); }
 
@@ -74,6 +100,7 @@ public class OODP {
             return map;
         }
 
+//        public static Class<? extends Constable>[]
         /**
          * This function simply return the wrapper type for primitive classes
          *
@@ -91,6 +118,8 @@ public class OODP {
             if (clazz == boolean.class) return Boolean.class;
             return null;
         }
+
+        public Object getAuto(String key) { return autoDetect(this.get(key)); }
 
         public <T> T get(String key, Class<T> clazz, T def) {
             T ob = get(key, clazz);
@@ -115,10 +144,15 @@ public class OODP {
                     if (o != null && (clazz.equals(o.getClass()) || getWrapperType(clazz) == o.getClass())) return (T) o;
                     else throw new RuntimeException((o != null ? o.getClass().getName() : "null") + " is not an instance of " + clazz.getName());
                 } else if (clazz.isEnum()) {
-                    String enumName = getString(key);
-                    try {
-                        return (T) Enum.valueOf((Class<Enum>) clazz, enumName);
-                    } catch (IllegalArgumentException e) { throw new RuntimeException("No enum constant " + clazz.getName() + "." + enumName, e); }
+                    if (use_enum_ordinal) return clazz.getEnumConstants()[getInt(key)];
+                    else {
+                        String enumName = getString(key);
+                        try {
+                            return (T) Enum.valueOf((Class<Enum>) clazz, enumName);
+                        } catch (IllegalArgumentException e) {
+                            throw new RuntimeException("No enum constant " + clazz.getName() + "." + enumName, e);
+                        }
+                    }
                 } else if (clazz.isArray()) {
                     if (clazz == int[].class) return (T) getIntArr(key);
                     else if (clazz == double[].class) return (T) getIntArr(key);
@@ -151,7 +185,7 @@ public class OODP {
         }
 
         public <T> T[] getArray(String key, Class<T> clazz) {
-            if (isDefault(clazz)) throw new RuntimeException("Do not use 'getArray()' for primitives, instead use a dedicated function for the desired type ex. 'getIntArr()', 'get(<key>, int[].class)' or 'getObjectArray(<key>, int[].class)'");
+            if (isDefault(clazz)) throw new RuntimeException("Do not use 'getArray()' for primitives, instead use a dedicated function for the desired type ex. 'getIntArr()', 'get(<key>, int[].class)' or 'getObjectArray(<key>, int.class)'");
             List<String> s = getCutArr(key);
             T[] arr = (T[]) Array.newInstance(clazz, s.size());
             for (int i = 0; i < arr.length; i++) arr[i] = parseTo(s.get(i), clazz);
@@ -337,17 +371,18 @@ public class OODP {
 
         @Override
         public String toString() { return "{" + String.join(",", this.entrySet().stream().map(e -> e.getKey() + "=" + e.getValue()).toList()) + "}"; }
+        public String toString(boolean pretty) { return pretty ? prettyUp(this.toString()) : this.toString(); }
         public byte[] getBytes() { return this.toString().getBytes(); }
     }
 
     private static final Class<?>[] DEFAULT_CLASSES = new Class<?>[]{
+            boolean.class,
             byte.class,
             short.class,
             int.class,
             long.class,
             float.class,
             double.class,
-            boolean.class,
             Boolean.class,
             Byte.class,
             Short.class,
@@ -358,7 +393,7 @@ public class OODP {
             UUID.class,
             String.class,
             char.class,
-            Character.class,
+            Character.class
     };
     public static boolean isDefault(@NotNull Class<?> clazz) {
         if (clazz.isPrimitive()) return true;
@@ -396,7 +431,9 @@ public class OODP {
     public static boolean isTable(@NotNull Class<?> clazz) { return clazz.isArray() || Collection.class.isAssignableFrom(clazz); }
 
     public static boolean isMap(Class<?> clazz) {
-        return Map.class.isAssignableFrom(clazz)
+        return AbstractMap.class.isAssignableFrom(clazz)
+                || AbstractCollection.class.isAssignableFrom(clazz)
+                || Map.class.isAssignableFrom(clazz)
                 || HashMap.class.isAssignableFrom(clazz)
                 || LinkedHashMap.class.isAssignableFrom(clazz)
                 || TreeMap.class.isAssignableFrom(clazz)
@@ -431,6 +468,7 @@ public class OODP {
     private int tree_prot = 100;
     private String spacing_string = "    ";
     private boolean pretty_up = false;
+    private boolean use_enum_ordinal = false;
 
     public OODP() {}
     public OODP(boolean pretty) { this.pretty_up = pretty; }
@@ -442,6 +480,7 @@ public class OODP {
     public void setPrettySpacingString(String space) { spacing_string = space; }
     public void treeProtection(int v) { tree_prot = v; }
     public void pretty(boolean v) { pretty_up = v; }
+    public void useEnumOrdinal(boolean v) { use_enum_ordinal = v; }
 
     public <I, T> void createClass(Class<I> in, Class<T> out, Function<I, T> func) { create_class.put(out, new Converter<>(in, out, func)); }
     public <T> void createClass(Class<T> out, Function<ObjectiveMap, T> func) { create_class.put(out, new Converter<>(ObjectiveMap.class, out, func)); }
@@ -520,17 +559,17 @@ public class OODP {
         else if (!ignore_processing)
             throw new RuntimeException(new ClassCastException(as.getName() + " can't be cast to " + clazz.getName()));
     }
-    public void processClasAs(Class<?> clazz, String as) {
+    public void processClassAs(Class<?> clazz, String as) {
         try {
             processClassAs(clazz, Class.forName(as));
         } catch (ClassNotFoundException e) { throw new RuntimeException(e); }
     }
-    public void processClasAs(String clazz, Class<?> as) {
+    public void processClassAs(String clazz, Class<?> as) {
         try {
             processClassAs(Class.forName(clazz), as);
         } catch (ClassNotFoundException e) { throw new RuntimeException(e); }
     }
-    public void processClasAs(String clazz, String as) {
+    public void processClassAs(String clazz, String as) {
         try {
             processClassAs(Class.forName(clazz), Class.forName(as));
         } catch (ClassNotFoundException e) { throw new RuntimeException(e); }
@@ -561,7 +600,7 @@ public class OODP {
         else if (isDefault(clazz)) {
             try {
                 Object o = raw;
-                if (clazz == String.class) o = raw.substring(1, raw.length() - 1);
+                if (clazz == String.class) o = !raw.isEmpty() && raw.charAt(0) == '\"' ? raw.substring(1, raw.length() - 1) : raw;
                 else if (clazz == int.class || clazz == Integer.class) o = Integer.parseInt(raw);
                 else if (clazz == double.class || clazz == Double.class) o = Double.parseDouble(raw);
                 else if (clazz == long.class || clazz == Long.class) o = Long.parseLong(raw);
@@ -659,6 +698,7 @@ public class OODP {
         byte[] data;
         if (o instanceof byte[] ba) data = ba;
         else if (o instanceof String s) data = s.getBytes();
+        else if (o instanceof ObjectiveMap om) data = om.toString(pretty).getBytes();
         else data = idp(o, pretty).getBytes();
         try {
             if (!f.exists() && (!f.createNewFile())) return false;
@@ -722,7 +762,7 @@ public class OODP {
 
             Class<T> c = (Class<T>) o.getClass();
 
-            if (log_c) System.err.println(separator.repeat(tree_d)+"Converting " + c + " " + o + " to String:");
+            if (log_c) System.out.println(separator.repeat(tree_d)+"Converting " + c + " " + o + " to String:");
 
             if (process_class_as.containsKey(c))
                 c = (Class<T>) process_class_as.get(c);
@@ -736,7 +776,10 @@ public class OODP {
             } else if (isDefault(c) || isStringable(c)) {
                 s = String.valueOf(o);
                 if (requiresParagraphs(c) && (!s.startsWith("{") || !s.endsWith("}"))) s =  "\"" + s + "\"";
-            } else if (o instanceof Enum<?> e) s = e.name();
+            } else if (o instanceof Enum<?> e) {
+                if (use_enum_ordinal) s = String.valueOf(e.ordinal());
+                else s = e.name();
+            }
             else if (isTable(c)) s = arrayToOodp(o, false);
             else if (isMap(c)) s = mapToOodp(o, false);
             else s = classToString(c, o);
@@ -748,6 +791,10 @@ public class OODP {
     }
 
     private  <T> String classToString(Class<T> c, Object o) {
+
+        if (o instanceof Class<?> cl) return cl.getName();
+        else if (o instanceof Path p) return p.toString();
+
         StringBuilder sb = new StringBuilder("{");
         for (Field field : filteredFields(c)) {
             if (!Modifier.isStatic(field.getModifiers()) && !field.getName().startsWith("this$")) {
@@ -834,57 +881,63 @@ public class OODP {
     }
 
     public static @NotNull String clean(@NotNull String s) {
-        StringBuilder sb = new StringBuilder();
+        char[] arr = new char[s.length()];
         char[] chars = s.toCharArray();
-        int i = 0;
+        int indx = 0;
         boolean p = false;
-        while (i < chars.length) {
-            char cr = chars[i];
-            if (!p) while (cr == ' ' || cr == '\t' || cr == '\n') {
-                i++;
-                cr = chars[i];
-            }
-            if (cr == '\"') p = !p;
-            sb.append(cr);
-            i++;
+        // # Never do this again
+//            while (i < chars.length) {
+//                char cr = chars[i];
+//                if (!p)
+//                    while ((cr == ' ' || cr == '\t' || cr == '\n' || cr == '\r') && ++i < chars.length)
+//                        cr = chars[i];
+//                else i++;
+//                if (cr == '\"') p = !p;
+//                arr[indx++] = cr;
+//            }
+        int l = chars.length;
+        for (char cr : chars) {
+            if (cr == '\"') {
+                p = !p;
+                arr[indx++] = cr;
+            } else if (p || !(cr == ' ' || cr == '\t' || cr == '\n' || cr == '\r')) arr[indx++] = cr;
         }
-        return sb.toString();
+        return (new String(arr, 0, indx));
     }
 
-    public static @NotNull List<String> smartSplit(@NotNull String s, char c) {
+    public static @NotNull List<String> smartSplit(@NotNull String s, char splc) {
         List<String> sts = new ArrayList<>();
         if (s.startsWith("[") || s.startsWith("{")) s = s.substring(1, s.length()-1);
         char[] chars = s.toCharArray();
-        int i = 0;
         boolean p = false;
         int a = 0;
         int o = 0;
-        StringBuilder sb = new StringBuilder();
-        while (i < chars.length) {
-            if (!p) while (chars[i] == ' ') i++;
-            char cr = chars[i];
-            if (cr == '\"') p = !p;
+        int indx = 0;
+        char[] arr = new char[chars.length];
+        for (char c : chars) {
+            if (c == '\"') p = !p;
             else if (!p) {
-                if (cr == '{') o++;
-                else if (cr == '}') o--;
-                else if (cr == '[') a++;
-                else if (cr == ']') a--;
+                if (c == '{') o++;
+                else if (c == '}') o--;
+                else if (c == '[') a++;
+                else if (c == ']') a--;
             }
-            if (cr != c || p || a != 0 || o != 0) sb.append(cr);
-            if ((!p && o == 0 && a == 0 && cr == c)) {
-                sts.add(sb.toString());
-                sb = new StringBuilder();
+            if (c != splc || p || a != 0 || o != 0) arr[indx++] = c;
+            if ((!p && o == 0 && a == 0 && c == splc)) {
+                sts.add(new String(arr, 0, indx));
+                arr = new char[chars.length];
+                indx = 0;
             }
-            i++;
         }
-        if (!sb.isEmpty()) sts.add(sb.toString());
+        if (indx != 0) sts.add(new String(arr, 0, indx));
         return sts;
     }
 
-    public ObjectiveMap map(File f) {
-        if (f == null || !f.exists()) throw new RuntimeException("File " + (f == null ? "null" : f.getName()) + " doesn't exist");
+    public ObjectiveMap map(@NotNull File f) { return map(f.toPath()); }
+    public ObjectiveMap map(Path p) {
+        if (p == null || !Files.exists(p)) throw new RuntimeException("File " + (p == null ? "null" : p.getFileName()) + " doesn't exist");
         try {
-            return this.map(new String(Files.readAllBytes(f.toPath())));
+            return this.map(new String(Files.readAllBytes(p)));
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -973,5 +1026,12 @@ public class OODP {
             i++;
         }
         return sb.toString();
+    }
+
+    public @NotNull Map<String, Class<?>> extractTypes(Class<?> c) {
+        HashMap<String, Class<?>> m = new HashMap<>();
+        for (Field f : c.getDeclaredFields())
+            m.put(f.getName(), f.getType());
+        return m;
     }
 }
